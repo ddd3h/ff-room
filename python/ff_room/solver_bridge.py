@@ -66,7 +66,7 @@ class SolverBridge:
     ) -> SimResult:
         """Build scene, run solver to convergence, return SimResult.
 
-        progress_callback(step, vel_change, div_max) called each step if set.
+        progress_callback(step, vel_change, div_max, T_mean) called each step if set.
         print_interval: print diagnostics every N steps (0=silent).
         """
         scene = Scene(self.config)
@@ -100,7 +100,8 @@ class SolverBridge:
         def _cb(res):
             diagnostics.append(res)
             if progress_callback:
-                progress_callback(res.step, res.velocity_change, res.divergence_max)
+                progress_callback(res.step, res.velocity_change, res.divergence_max,
+                                  res.T_mean)
             if print_interval > 0 and res.step % print_interval == 0:
                 line = (f"  step={res.step:4d}  vel_change={res.velocity_change:.3e}"
                         f"  p_res={res.pressure_residual:.3e}"
