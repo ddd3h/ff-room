@@ -337,6 +337,43 @@ result2 = SolverBridge(config).run()
 
 ## 4. 可視化
 
+### 部屋セットアップ図 (シミュレーション前に確認)
+
+YAML 設定を読み込んだあと、シミュレーションを実行する前に部屋の構成を図で確認できる。
+扇風機の位置・向き、障害物、窓・ドアの配置を3方向から表示する。
+
+```python
+from ff_room import SceneConfig, ScenePlotter
+
+config = SceneConfig.load_yaml("examples/summer_cooling.yaml")
+ScenePlotter(config).plot(save="results/scene.png", show=False)
+```
+
+または:
+
+```python
+from ff_room import SceneConfig, plot_scene
+
+plot_scene(config, save="results/scene.png", show=False)
+```
+
+生成される図:
+
+| パネル | 内容 |
+|--------|------|
+| **Top view (XY)** | 床面からの俯瞰。ベッド・デスクの位置、扇風機の向き、南北壁の窓・ドア位置 |
+| **Section YZ** | 扇風機の x 座標を通る縦断面。南北壁の窓・ドアの高さ範囲を確認 |
+| **Section XZ** | 扇風機の y 座標を通る側断面。東西壁の開口部高さを確認 |
+
+図タイトルに部屋サイズ、扇風機数、開口部数、温度設定 (T_in/T_out/target) が表示される。
+
+`run_cooling.py` はシミュレーション前に自動でセットアップ図を保存する
+(`results/<stem>_scene.png`)。
+
+---
+
+### 流れ場の可視化
+
 PyVistaウィンドウの操作:
 - マウス左ドラッグ: 回転
 - マウス右ドラッグ / スクロール: ズーム

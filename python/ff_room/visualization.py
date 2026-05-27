@@ -1,16 +1,255 @@
-"""Visualization for SimResult.
+"""Visualization for SimResult and SceneConfig.
 
-Two backends:
+Two backends for flow results:
   - matplotlib (always available, 2D slices/quivers, saves PNG)
   - pyvista     (3D interactive, requires OpenGL; falls back gracefully)
+
+ScenePlotter: room setup diagram (no simulation needed).
 """
 from __future__ import annotations
-from typing import Optional, Tuple
+from typing import Optional, TYPE_CHECKING
 from pathlib import Path
 
 import numpy as np
 
 from .solver_bridge import SimResult
+
+if TYPE_CHECKING:
+    from .config import SceneConfig
+
+
+# ---------------------------------------------------------------------------
+# Scene setup diagram (SceneConfig only — no simulation needed)
+# ---------------------------------------------------------------------------
+
+class ScenePlotter:
+    """Room layout diagram from SceneConfig: floor plan + two cross-sections.
+
+    Usage::
+
+        from ff_room import SceneConfig
+        from ff_room.visualization import ScenePlotter
+
+        cfg = SceneConfig.load_yaml("examples/summer_cooling.yaml")
+        ScenePlotter(cfg).plot(save="results/scene.png", show=False)
+    """
+
+    # Visual constants
+    _C_OBS  = '#8B7355'   # obstacle: brown
+    _C_FAN  = '#1E88E5'   # fan marker: blue
+    _C_ARR  = '#0D47A1'   # fan arrow: dark blue
+    _C_OPEN = '#43A047'   # opening: green
+
+    def __init__(self, config: "SceneConfig"):
+        from .config import SceneConfig  # avoid circular at module level
+        self.cfg = config
+        r = config.room
+        self.Lx, self.Ly, self.Lz = r.size
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def plot(self, save: Optional[str] = None, show: bool = True):
+        """3-panel setup diagram: top view + YZ section + XZ section."""
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as mpatches
+        from matplotlib.lines import Line2D
+
+        fig, (ax_top, ax_yz, ax_xz) = plt.subplots(1, 3, figsize=(16, 5))
+
+        Lx, Ly, Lz = self.Lx, self.Ly, self.Lz
+        cfg = self.cfg
+        arrow_len = max(Lx, Ly, Lz) * 0.12
+
+        # Cross-section planes pass through first fan (or room center)
+        if cfg.fans:
+            sx, sy = cfg.fans[0].position[0], cfg.fans[0].position[1]
+        else:
+            sx, sy = Lx / 2, Ly / 2
+
+        # --- room outlines ---
+        self._room_box(ax_top, 0, Lx, 0, Ly, 'x [m]', 'y [m]', 'Top view (XY — floor plan)',
+                       labels={'bottom': 'South (y=0)', 'top': 'North (y=Ly)',
+                               'left': 'West', 'right': 'East'})
+        self._room_box(ax_yz, 0, Ly, 0, Lz, 'y [m]', 'z [m]',
+                       f'Section YZ  (x = {sx:.2f} m)',
+                       labels={'bottom': 'South', 'top': 'North'})
+        self._room_box(ax_xz, 0, Lx, 0, Lz, 'x [m]', 'z [m]',
+                       f'Section XZ  (y = {sy:.2f} m)',
+                       labels={'left': 'West', 'right': 'East'})
+
+        # --- obstacles ---
+        for obs in cfg.obstacles:
+            bmi, bma = obs.bbox_min, obs.bbox_max
+            self._rect(ax_top, bmi[0], bmi[1], bma[0]-bmi[0], bma[1]-bmi[1],
+                       obs.name, self._C_OBS)
+            if bmi[0] <= sx <= bma[0]:
+                self._rect(ax_yz, bmi[1], bmi[2], bma[1]-bmi[1], bma[2]-bmi[2],
+                           obs.name, self._C_OBS)
+            if bmi[1] <= sy <= bma[1]:
+                self._rect(ax_xz, bmi[0], bmi[2], bma[0]-bmi[0], bma[2]-bmi[2],
+                           obs.name, self._C_OBS)
+
+        # --- openings ---
+        for op in cfg.openings:
+            self._draw_opening(ax_top, ax_yz, ax_xz, op, Lx, Ly, Lz)
+
+        # --- fans ---
+        for fan in cfg.fans:
+            fx, fy, fz = fan.position
+            dv = fan.direction_vector()  # (dx, dy, dz) unit vector
+
+            self._fan_marker(ax_top, fx, fy, dv[0], dv[1], fan.name, arrow_len)
+            self._fan_marker(ax_yz,  fy, fz, dv[1], dv[2], fan.name, arrow_len)
+            self._fan_marker(ax_xz,  fx, fz, dv[0], dv[2], fan.name, arrow_len)
+
+        # --- figure title ---
+        sc = cfg.solver
+        name = cfg.metadata.get('name', cfg.metadata.get('description', 'room'))
+        if isinstance(name, str) and len(name) > 40:
+            name = name[:37] + '...'
+        thermal = ''
+        if sc.T_initial != sc.T_outside or sc.T_target is not None:
+            thermal = f'  |  T_in={sc.T_initial}°C  T_out={sc.T_outside}°C'
+            if sc.T_target is not None:
+                thermal += f'  →  target={sc.T_target}°C'
+        title = (f'{name}  |  {Lx:.1f}×{Ly:.1f}×{Lz:.1f} m'
+                 f'  |  {len(cfg.fans)} fan(s)  {len(cfg.openings)} opening(s){thermal}')
+        fig.suptitle(title, fontsize=10)
+
+        # --- legend ---
+        legend_elems = [
+            mpatches.Patch(facecolor=self._C_OBS, edgecolor='#5D4037',
+                           alpha=0.7, label='Obstacle'),
+            Line2D([0], [0], color=self._C_OPEN, lw=5, label='Opening (window/door)'),
+            Line2D([0], [0], marker='o', color='w',
+                   markerfacecolor=self._C_FAN, markersize=9, label='Fan'),
+            Line2D([0], [0], color=self._C_ARR, lw=2.5, marker='>',
+                   markersize=8, label='Fan direction'),
+        ]
+        fig.legend(handles=legend_elems, loc='lower center', ncol=4,
+                   bbox_to_anchor=(0.5, -0.06), fontsize=8)
+
+        plt.tight_layout()
+        if save:
+            Path(save).parent.mkdir(parents=True, exist_ok=True)
+            plt.savefig(save, dpi=150, bbox_inches='tight')
+            print(f"Saved scene diagram: {save}")
+        if show:
+            plt.show()
+        return fig
+
+    # ------------------------------------------------------------------
+    # Drawing helpers
+    # ------------------------------------------------------------------
+
+    def _room_box(self, ax, x0, x1, y0, y1,
+                  xlabel, ylabel, title, labels=None):
+        import matplotlib.patches as mpatches
+        ax.add_patch(mpatches.Rectangle(
+            (x0, y0), x1 - x0, y1 - y0,
+            fill=False, edgecolor='black', lw=2.0, zorder=2))
+        ax.set_xlim(x0 - 0.4, x1 + 0.4)
+        ax.set_ylim(y0 - 0.3, y1 + 0.4)
+        ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
+        ax.set_title(title, fontsize=9)
+        ax.set_aspect('equal')
+        if labels:
+            cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+            kw = dict(fontsize=6, color='#888888')
+            if 'bottom' in labels:
+                ax.text(cx, y0 - 0.12, labels['bottom'], ha='center', va='top', **kw)
+            if 'top' in labels:
+                ax.text(cx, y1 + 0.12, labels['top'], ha='center', va='bottom', **kw)
+            if 'left' in labels:
+                ax.text(x0 - 0.12, cy, labels['left'], ha='right', va='center',
+                        rotation=90, **kw)
+            if 'right' in labels:
+                ax.text(x1 + 0.12, cy, labels['right'], ha='left', va='center',
+                        rotation=90, **kw)
+
+    def _rect(self, ax, x, y, w, h, label, color):
+        import matplotlib.patches as mpatches
+        ax.add_patch(mpatches.Rectangle(
+            (x, y), w, h,
+            facecolor=color, edgecolor='#5D4037', alpha=0.65, lw=1.2, zorder=3))
+        ax.text(x + w/2, y + h/2, label, ha='center', va='center',
+                fontsize=6, color='white', zorder=4)
+
+    def _fan_marker(self, ax, px, pz, dvx, dvz, name, arrow_len):
+        ax.plot(px, pz, 'o', color=self._C_FAN, ms=9, zorder=6)
+        mag = (dvx**2 + dvz**2) ** 0.5
+        if mag > 0.05:
+            ax.annotate(
+                '', xy=(px + dvx / mag * arrow_len, pz + dvz / mag * arrow_len),
+                xytext=(px, pz),
+                arrowprops=dict(arrowstyle='->', color=self._C_ARR, lw=2.2),
+                zorder=6)
+        ax.text(px, pz + arrow_len * 0.15 + 0.08, name,
+                ha='center', va='bottom', fontsize=6.5,
+                color=self._C_FAN, fontweight='bold', zorder=7)
+
+    def _draw_opening(self, ax_top, ax_yz, ax_xz, op, Lx, Ly, Lz):
+        """Draw opening on all relevant panels."""
+        wall = op.wall.lower()
+        lw = 5.5
+        c  = self._C_OPEN
+
+        def _label(ax, x, y, name, ha='center', va='bottom'):
+            ax.text(x, y, name, ha=ha, va=va, fontsize=6, color=c, zorder=7)
+
+        if wall == 'south':    # y=0  center=(x_c, z_c)  size=(w_x, h_z)
+            x_c, z_c = op.center;  w_x, h_z = op.size
+            ax_top.plot([x_c - w_x/2, x_c + w_x/2], [0, 0], '-', color=c, lw=lw, zorder=5)
+            _label(ax_top, x_c, 0.08, op.name)
+            ax_yz.plot([0, 0], [z_c - h_z/2, z_c + h_z/2], '-', color=c, lw=lw, zorder=5)
+            _label(ax_yz, 0.08, z_c, op.name, ha='left', va='center')
+
+        elif wall == 'north':  # y=Ly center=(x_c, z_c)  size=(w_x, h_z)
+            x_c, z_c = op.center;  w_x, h_z = op.size
+            ax_top.plot([x_c - w_x/2, x_c + w_x/2], [Ly, Ly], '-', color=c, lw=lw, zorder=5)
+            _label(ax_top, x_c, Ly - 0.08, op.name, va='top')
+            ax_yz.plot([Ly, Ly], [z_c - h_z/2, z_c + h_z/2], '-', color=c, lw=lw, zorder=5)
+            _label(ax_yz, Ly - 0.08, z_c, op.name, ha='right', va='center')
+
+        elif wall == 'west':   # x=0  center=(y_c, z_c)  size=(w_y, h_z)
+            y_c, z_c = op.center;  w_y, h_z = op.size
+            ax_top.plot([0, 0], [y_c - w_y/2, y_c + w_y/2], '-', color=c, lw=lw, zorder=5)
+            _label(ax_top, 0.08, y_c, op.name, ha='left', va='center')
+            ax_xz.plot([0, 0], [z_c - h_z/2, z_c + h_z/2], '-', color=c, lw=lw, zorder=5)
+            _label(ax_xz, 0.08, z_c, op.name, ha='left', va='center')
+
+        elif wall == 'east':   # x=Lx center=(y_c, z_c)  size=(w_y, h_z)
+            y_c, z_c = op.center;  w_y, h_z = op.size
+            ax_top.plot([Lx, Lx], [y_c - w_y/2, y_c + w_y/2], '-', color=c, lw=lw, zorder=5)
+            _label(ax_top, Lx - 0.08, y_c, op.name, ha='right', va='center')
+            ax_xz.plot([Lx, Lx], [z_c - h_z/2, z_c + h_z/2], '-', color=c, lw=lw, zorder=5)
+            _label(ax_xz, Lx - 0.08, z_c, op.name, ha='right', va='center')
+
+        elif wall == 'floor':   # z=0  center=(x_c, y_c)  size=(w_x, w_y)
+            x_c, y_c = op.center;  w_x, w_y = op.size
+            import matplotlib.patches as mpatches
+            ax_top.add_patch(mpatches.Rectangle(
+                (x_c - w_x/2, y_c - w_y/2), w_x, w_y,
+                facecolor=c, alpha=0.35, edgecolor=c, lw=1.5, zorder=5))
+            ax_xz.plot([x_c - w_x/2, x_c + w_x/2], [0, 0], '-', color=c, lw=lw, zorder=5)
+            _label(ax_xz, x_c, 0.06, op.name)
+
+        elif wall == 'ceiling':  # z=Lz center=(x_c, y_c)  size=(w_x, w_y)
+            x_c, y_c = op.center;  w_x, w_y = op.size
+            import matplotlib.patches as mpatches
+            ax_top.add_patch(mpatches.Rectangle(
+                (x_c - w_x/2, y_c - w_y/2), w_x, w_y,
+                facecolor=c, alpha=0.35, edgecolor=c, lw=1.5, zorder=5))
+            ax_xz.plot([x_c - w_x/2, x_c + w_x/2], [Lz, Lz], '-', color=c, lw=lw, zorder=5)
+            _label(ax_xz, x_c, Lz - 0.06, op.name, va='top')
+
+
+def plot_scene(config: "SceneConfig", save: Optional[str] = None,
+               show: bool = True):
+    """Convenience wrapper: draw and optionally save room setup diagram."""
+    return ScenePlotter(config).plot(save=save, show=show)
 
 
 # ---------------------------------------------------------------------------
@@ -423,3 +662,7 @@ class Visualizer:
         """Save multi-panel PNG (no display needed)."""
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         return self._mpl.multi_panel(save=path, show=False)
+
+    def save_scene(self, path: str = "results/scene.png"):
+        """Save room setup diagram (fan/obstacles/openings, no flow data needed)."""
+        return ScenePlotter(self.result.config).plot(save=path, show=False)

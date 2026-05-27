@@ -1,0 +1,44 @@
+# Build artifacts
+cpp/build/
+python/ff_room/_ffroom_core*.so
+python/ff_room/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+Makefile
+
+# Simulation results
+results/
+
+# Python packaging
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.venv
+venv/
+env/

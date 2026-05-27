@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "python"))
 
-from ff_room import SceneConfig, SolverBridge, Visualizer, ResultStore
+from ff_room import SceneConfig, SolverBridge, Visualizer, ResultStore, ScenePlotter
 from ff_room.io import ExperimentLog
 
 config_path = Path(sys.argv[1]) if len(sys.argv) > 1 else \
@@ -35,6 +35,12 @@ print(f"Thermal: T_initial={sc.T_initial}°C  T_outside={sc.T_outside}°C  "
       f"T_target={sc.T_target}°C  buoyancy={sc.buoyancy}")
 print()
 
+stem = config_path.stem
+scene_png = str(out_dir / f"{stem}_scene.png")
+ScenePlotter(config).plot(save=scene_png, show=False)
+print(f"Scene diagram: {scene_png}")
+print()
+
 bridge = SolverBridge(config)
 result = bridge.run(print_interval=100)
 
@@ -44,7 +50,6 @@ print(f"\nDone: steps={result.steps}  sim_time={sim_time_s:.1f}s  "
 print(f"  T_mean={result.T_mean:.2f}°C  (target={sc.T_target}°C)  "
       f"div_max={result.divergence_max:.3e}")
 
-stem = config_path.stem
 npz_path = out_dir / f"{stem}.npz"
 ResultStore.save_npz(result, str(npz_path))
 print(f"Saved: {npz_path}")
