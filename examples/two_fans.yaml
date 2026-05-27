@@ -1,0 +1,30 @@
+metadata:
+  name: two_fans
+  description: Two fans facing each other — compare with basic_room
+
+room:
+  size: [5.0, 4.0, 2.5]
+  grid: [25, 20, 12]
+
+fans:
+  - name: fan_west
+    position: [0.5, 2.0, 1.2]
+    direction: [0.0, 0.0]    # blowing +x
+    velocity: 3.0
+    radius: 0.15
+  - name: fan_east
+    position: [4.5, 2.0, 1.2]
+    direction: [180.0, 0.0]  # blowing -x
+    velocity: 2.0
+    radius: 0.15
+
+obstacles: []
+
+solver:
+  dt: 0.01
+  max_steps: 600
+  convergence_tol: 1.0e-4
+  rho: 1.2
+  nu: 1.5e-5
+  poisson_max_iter: 1000
+  poisson_tol: 1.0e-6

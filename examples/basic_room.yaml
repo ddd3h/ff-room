@@ -1,0 +1,30 @@
+metadata:
+  name: basic_room
+  description: Single fan in 5x4x2.5m room, blowing in +x direction
+  author: ""
+  date: ""
+
+room:
+  size: [5.0, 4.0, 2.5]
+  grid: [25, 20, 12]
+
+fans:
+  - name: fan0
+    position: [0.5, 2.0, 1.2]
+    direction: [0.0, 0.0]   # azimuth=0 (blowing +x), elevation=0 (horizontal)
+    velocity: 3.0
+    radius: 0.15
+
+obstacles:
+  - name: sofa
+    bbox_min: [2.0, 0.5, 0.0]
+    bbox_max: [3.0, 1.8, 0.9]
+
+solver:
+  dt: 0.01
+  max_steps: 1000
+  convergence_tol: 1.0
+  rho: 1.2
+  nu: 1.5e-5
+  poisson_max_iter: 1000
+  poisson_tol: 1.0e-6

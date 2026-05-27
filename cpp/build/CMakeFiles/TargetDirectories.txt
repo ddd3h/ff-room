@@ -1,0 +1,7 @@
+/home/ddd3h/ff-room/cpp/build/CMakeFiles/_ffroom_core.dir
+/home/ddd3h/ff-room/cpp/build/CMakeFiles/edit_cache.dir
+/home/ddd3h/ff-room/cpp/build/CMakeFiles/rebuild_cache.dir
+/home/ddd3h/ff-room/cpp/build/CMakeFiles/list_install_components.dir
+/home/ddd3h/ff-room/cpp/build/CMakeFiles/install.dir
+/home/ddd3h/ff-room/cpp/build/CMakeFiles/install/local.dir
+/home/ddd3h/ff-room/cpp/build/CMakeFiles/install/strip.dir

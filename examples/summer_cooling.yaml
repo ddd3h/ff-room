@@ -1,0 +1,58 @@
+metadata:
+  name: summer_cooling
+  description: >
+    Summer ventilation: hot room (32°C), cool outside (25°C).
+    Window (north wall) + entrance door cracked open (south wall) = cross-ventilation.
+    Fan near the window, blowing inward (-y), draws cool outside air through the window
+    into the room, hot air exits through the door.
+    Goal: find the best fan position to cool the room to 30°C as fast as possible.
+    Compare: try fan.direction [270, 0] (blowing -y, pulls air from window side)
+             vs     fan.direction [90, 0]  (blowing +y, pushes air toward window).
+
+room:
+  size: [6.0, 4.5, 2.5]   # 6m wide (x), 4.5m deep (y), 2.5m ceiling (z)
+  grid: [30, 22, 12]
+
+# Fan blowing -y (away from north wall) = draws cool air in from north window.
+# Change fan.direction or fan.position to test different placements.
+fans:
+  - name: fan_at_window
+    position: [3.0, 3.8, 0.9]   # near north wall (y=4.5m), breathing height (z=0.9m)
+    direction: [270.0, 0.0]      # blowing -y (southward, INTO the room from window side)
+    velocity: 2.5                # m/s — typical pedestal fan
+    radius: 0.15
+
+obstacles:
+  - name: bed
+    bbox_min: [0.3, 0.3, 0.0]
+    bbox_max: [2.0, 2.5, 0.5]
+  - name: desk
+    bbox_min: [3.5, 0.3, 0.0]
+    bbox_max: [5.2, 1.5, 0.75]
+
+# Two openings for cross-ventilation:
+#   window_north: cool outside air enters here (fan draws it in)
+#   door_south:   hot indoor air exits here (pushed out by positive pressure)
+openings:
+  - name: window_north
+    wall: north
+    center: [3.0, 1.2]   # (x_center, z_center) on the north wall
+    size: [0.9, 1.1]     # 0.9m wide, 1.1m tall
+  - name: door_south
+    wall: south
+    center: [1.5, 1.0]   # near the entrance (left side), full door height
+    size: [0.8, 2.0]     # 0.8m wide, 2.0m tall (door ajar)
+
+solver:
+  dt: 0.05               # larger step for faster simulation (CFL~0.6, stable)
+  max_steps: 5000        # 5000 × 0.05 = 250 seconds of physical time
+  convergence_tol: 1.0
+  rho: 1.2
+  nu: 1.5e-5
+  poisson_max_iter: 1000
+  poisson_tol: 1.0e-6
+  # Thermal
+  T_initial: 32.0        # hot indoor temperature [°C]
+  T_outside: 25.0        # cool outdoor temperature [°C]
+  T_target:  30.0        # stop when mean indoor temp cools to 30°C
+  buoyancy:  true        # hot air rises — important for natural stratification
