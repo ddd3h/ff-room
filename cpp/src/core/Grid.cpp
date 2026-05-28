@@ -22,6 +22,28 @@ Grid::Grid(int nx, int ny, int nz, double lx, double ly, double lz)
     cell_type.assign(nx*ny*nz, CellType::FLUID);
     T.assign(nx*ny*nz, 0.0);
     T_tmp.assign(nx*ny*nz, 0.0);
+
+    // Initialize uniform face coordinates and spacings
+    xs.resize(nx + 1);
+    ys.resize(ny + 1);
+    zs.resize(nz + 1);
+    for (int i = 0; i <= nx; i++) xs[i] = i * dx;
+    for (int j = 0; j <= ny; j++) ys[j] = j * dy;
+    for (int k = 0; k <= nz; k++) zs[k] = k * dz;
+
+    dxv.assign(nx, dx);
+    dyv.assign(ny, dy);
+    dzv.assign(nz, dz);
+}
+
+void Grid::set_face_coords(std::vector<double> xs_, std::vector<double> ys_,
+                           std::vector<double> zs_) {
+    xs = std::move(xs_);
+    ys = std::move(ys_);
+    zs = std::move(zs_);
+    for (int i = 0; i < Nx; i++) dxv[i] = xs[i+1] - xs[i];
+    for (int j = 0; j < Ny; j++) dyv[j] = ys[j+1] - ys[j];
+    for (int k = 0; k < Nz; k++) dzv[k] = zs[k+1] - zs[k];
 }
 
 void Grid::zero_velocity() {

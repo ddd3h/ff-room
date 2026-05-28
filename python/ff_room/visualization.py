@@ -666,3 +666,19 @@ class Visualizer:
     def save_scene(self, path: str = "results/scene.png"):
         """Save room setup diagram (fan/obstacles/openings, no flow data needed)."""
         return ScenePlotter(self.result.config).plot(save=path, show=False)
+
+    def save_animation(self, snapshots, path: str = "results/animation.gif",
+                       fps: int = 10):
+        """Save animated GIF/MP4 from snapshots captured with run_animated().
+
+        Parameters
+        ----------
+        snapshots : list[FieldSnapshot]
+            Snapshots returned by SolverBridge.run_animated().
+        path : str
+            Output file path.  Use .gif for GIF, .mp4 for MP4.
+        fps : int
+            Frames per second.
+        """
+        from .animation import Animator
+        Animator(snapshots, self.result.config).save_gif(path, fps=fps)

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 project(ffroom_core CXX)
 
+find_package(OpenMP)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -50,6 +52,7 @@ set(CORE_SOURCES
     src/core/PoissonSolver.cpp
     src/core/BoundaryManager.cpp
     src/core/FluidSolver.cpp
+    src/core/LBMSolver.cpp
 )
 
 # Pybind11 extension module
@@ -59,6 +62,14 @@ pybind11_add_module(_ffroom_core
 )
 
 target_include_directories(_ffroom_core PRIVATE src)
+
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(_ffroom_core PRIVATE OpenMP::OpenMP_CXX)
+    target_compile_definitions(_ffroom_core PRIVATE FFROOM_HAS_OPENMP)
+    message(STATUS "OpenMP found — enabling parallelization")
+else()
+    message(STATUS "OpenMP not found — building without parallelization")
+endif()
 
 # Install into python package directory
 install(TARGETS _ffroom_core

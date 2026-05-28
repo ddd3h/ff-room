@@ -25,7 +25,20 @@ enum class CellType : uint8_t {
 
 struct Grid {
     int Nx, Ny, Nz;
-    double dx, dy, dz;  // cell size [m]
+    double dx, dy, dz;  // mean cell size [m] (= Lx/Nx etc.; kept for compat)
+
+    // Variable cell spacings (non-uniform grid)
+    std::vector<double> dxv;  // dxv[i] = x_face[i+1] - x_face[i], size Nx
+    std::vector<double> dyv;  // dyv[j] = y_face[j+1] - y_face[j], size Ny
+    std::vector<double> dzv;  // dzv[k] = z_face[k+1] - z_face[k], size Nz
+    // Face coordinates
+    std::vector<double> xs;   // x face positions, size Nx+1
+    std::vector<double> ys;   // y face positions, size Ny+1
+    std::vector<double> zs;   // z face positions, size Nz+1
+
+    // Initialize/recompute spacing from face coordinate arrays
+    void set_face_coords(std::vector<double> xs_, std::vector<double> ys_,
+                         std::vector<double> zs_);
 
     std::vector<double> u;  // x-velocity on x-faces
     std::vector<double> v;  // y-velocity on y-faces

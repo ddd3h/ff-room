@@ -17,11 +17,11 @@
 ├────────────┴───────────────────────────────────────┤
 │ C++ レイヤー                                        │
 │                                                    │
-│  Grid               FluidSolver                   │
-│  (MAC格子)           (射影法メインループ)             │
+│  Grid               FluidSolver    LBMSolver      │
+│  (MAC格子, 非均一)   (射影法)        (D3Q19 BGK)    │
 │       ↕                   ↕                       │
 │  BoundaryManager    PoissonSolver                 │
-│  (境界条件適用)      (CG法)                         │
+│  (境界条件適用)      (CG + Multigrid V-cycle)      │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -53,7 +53,7 @@ p[i][j][k]: 圧力      - セル中心 (i=0..Nx-1, j=0..Ny-1, k=0..Nz-1)
 
 1ステップの流れ:
 ```
-compute_intermediate()          ← advection(upwind1) + diffusion(中心差分)
+compute_intermediate()          ← advection(UPWIND1/QUICK/LAX_WENDROFF) + diffusion(中心差分)
 apply_noslip()                  ← 壁・障害物: u=0
 apply_inflow()                  ← 扇風機: u=U_fan
 [apply_buoyancy()]              ← (thermal) w* += g*β*(T_face - T_ref)*dt
@@ -62,11 +62,13 @@ poisson_.solve()                ← CG法で ∇²p = rhs
 apply_correction()              ← u -= (dt/ρ) ∇p
 apply_noslip()                  ← 再適用
 apply_inflow()                  ← 再適用
-[advect_temperature()]          ← (thermal) upwind + 拡散; T ← T_tmp
+[advect_temperature()]          ← (thermal) UPWIND1/QUICK/LAX_WENDROFF + 拡散; T ← T_tmp
 [apply_opening_temperature()]   ← (thermal) 開口部: 流入=T_outside, 流出=ゼロ勾配
 ```
 
-`[]` は `thermal=true` のときのみ実行。
+`[]` は `thermal=true` のときのみ実行。  
+移流スキームは `FluidSolverParams.advection` (デフォルト UPWIND1) で切り替え。  
+OpenMP 並列化は `FluidSolverParams.use_openmp` (デフォルト false) で制御。
 
 ### PoissonSolver (CG法)
 
@@ -79,31 +81,23 @@ apply_inflow()                  ← 再適用
 
 ## 「○○したい場合はここを直す」
 
-### A. 扇風機を斜め方向に向けたい
+### A. 扇風機を斜め方向に向けたい — 実装済み
 
-**現状**: `scene.py` の `_add_fan()` が `snapped_axis()` で最近軸にスナップ。
+**実装済み**: `scene.py` の `_add_fan()` が `direction_vector()` から 3成分速度を計算し、
+`FanBC.vel = [vx*V, vy*V, vz*V]` として C++ `apply_inflow()` に渡す。
+`apply_inflow()` は `FanBC.vel` の3成分を対応するface速度 (u/v/w) すべてに設定する。
 
-**必要な変更**:
+使い方:
 
-1. `BoundaryManager` に新しいBC型を追加 (`cpp/src/core/BoundaryManager.hpp`):
-   ```cpp
-   struct ObliqueInflowBC {
-       // セルインデックスリスト + 速度ベクトル
-       std::vector<std::array<int,3>> cells;
-       std::array<double,3> vel;
-   };
-   ```
+```yaml
+fans:
+  - direction: [45, 0]    # 斜め45° (X-Y平面)
+  - direction: [0, 30]    # 水平+30°上向き
+  - direction: [0, -90]   # 真下
+```
 
-2. `FluidSolver::compute_intermediate()` でINFLOW近傍の速度を補間処理。  
-   斜め流入は速度の分解 (u_x, u_y, u_z) を各faceに分配する。
-   具体的には、INFLOWセルの隣接面すべてに `vel[ax] * face_normal[ax]` を設定。
-
-3. `scene.py` の `_add_fan()` で `snapped_axis()` 分岐を削除し、
-   3成分すべて設定するパスに変更。
-
-4. バインディングに `ObliqueInflowBC` を追加 (`module.cpp`)。
-
-**難易度**: 中 (2〜3時間)
+`snapped_axis()` はBC面の決定 (扇風機パッチをどの壁に置くか) にのみ使用。
+速度ベクトル自体はスナップしない。
 
 ---
 
@@ -160,27 +154,73 @@ f_z = g β (T_face - T_ref)        (Boussinesq浮力, +z = 上方向)
 
 ---
 
-### C. 移流スキームを高精度化したい (2次精度)
+### C-0. アニメーション出力 (GIF/MP4) — 実装済み
 
-**現状**: `compute_intermediate()` で `upwind1()` (1次upwind)。数値拡散が強い。
+**実装済み** (TASK-01): `SolverBridge.run_animated()` でフィールドスナップショットを収集し、
+`Animator` クラスで GIF/MP4 に書き出せる。
 
-**選択肢**:
+**実装の場所**:
 
-#### Lax-Wendroff (2次精度, 条件付き安定)
-```cpp
-// φの1次元移流
-static inline double lax_wendroff(double phi_m, double phi_c, double phi_p,
-                                   double uc, double h, double dt) {
-    double flux_r = 0.5*uc*(phi_p+phi_c) - 0.5*uc*uc*dt/h*(phi_p-phi_c);
-    double flux_l = 0.5*uc*(phi_c+phi_m) - 0.5*uc*uc*dt/h*(phi_c-phi_m);
-    return (flux_r - flux_l) / h;
-}
+| ファイル | 役割 |
+|---------|------|
+| `python/ff_room/solver_bridge.py` | `FieldSnapshot` データクラス, `SolverBridge.run_animated(save_every, progress_callback, print_interval)` |
+| `python/ff_room/animation.py` | `Animator(snapshots, config)` クラス — `save_gif(path, fps, dpi)`, `save_mp4(path, fps, dpi)` |
+| `python/ff_room/visualization.py` | `Visualizer.save_animation(snapshots, path, fps)` ラッパー |
+| `python/ff_room/__init__.py` | `FieldSnapshot`, `Animator` をエクスポート |
+
+**`FieldSnapshot` フィールド**:
+
+```python
+@dataclass
+class FieldSnapshot:
+    step:    int         # ソルバーステップ番号
+    time_s:  float       # 物理時間 = step * dt [s]
+    T_mean:  float       # 室内平均温度 [°C]
+    speed:   np.ndarray  # (Nx, Ny, Nz) 速度スカラー [m/s]
+    T_field: np.ndarray  # (Nx, Ny, Nz) 温度場 [°C]; 非熱計算時はゼロ
+    vel:     np.ndarray  # (Nx, Ny, Nz, 3) セル中心速度ベクトル [m/s]
 ```
+
+**`Animator` のレンダリング仕様**:
+- 左パネル: 上面図 (XY スライス, z=Nz//2) — 速度カラーマップ + 方向矢印
+- 右パネル: 側面図 (YZ スライス, x=Nx//2) — 非熱計算: 速度, 熱計算: 温度 (RdBu_r)
+- カラーバー範囲: 全フレーム共通 (99パーセンタイルでクリップ)
+- `save_mp4()` は ffmpeg がない環境では GIF に自動フォールバック
+
+---
+
+### C. 移流スキームを高精度化したい — 実装済み
+
+**実装済み**: `compute_intermediate()` と `advect_temperature()` で QUICK/Lax-Wendroff が選択可能。
+設定: `solver.advection` フィールドで直接指定。
+
+**実装の場所**:
+
+| ファイル | 役割 |
+|---------|------|
+| `cpp/src/core/FluidSolver.hpp` | `enum class AdvectionScheme { UPWIND1, QUICK, LAX_WENDROFF }`, `FluidSolverParams.advection` フィールド |
+| `cpp/src/core/FluidSolver.cpp` | `quick_adv()`, `lax_wendroff_adv()` ヘルパー, `compute_intermediate()` / `advect_temperature()` 内のスキームディスパッチ |
+| `python/ff_room/config.py` | `SolverConfig.advection: str = "upwind"` |
+| `python/ff_room/solver_bridge.py` | `_apply_solver_flags()` が `sc.advection` → `params.advection` に変換 |
+
+**設定** (YAML または Python):
+
+```yaml
+solver:
+  advection: quick          # upwind | quick | lax_wendroff
+```
+
+```python
+config.solver.advection = "quick"
+result = SolverBridge(config).run()
+```
+
+**選択肢** (実装済み):
 
 #### QUICK (3次精度 upwind-biased)
 ```cpp
-static inline double quick(double phi_mm, double phi_m, double phi_c,
-                            double phi_p, double uc) {
+static inline double quick_adv(double phi_mm, double phi_m, double phi_c,
+                                double phi_p, double uc) {
     if (uc > 0)
         return (3*phi_c + 6*phi_m - phi_mm) / 8.0;  // upwind-biased
     else
@@ -188,72 +228,75 @@ static inline double quick(double phi_mm, double phi_m, double phi_c,
 }
 ```
 
-`compute_intermediate()` 内の `upwind1(...)` を置き換えるだけ。
-境界セル (i=1, i=Nx-1 など) では1次にフォールバックが必要。
-
-**`FluidSolverParams` に追加**:
+#### Lax-Wendroff (2次精度, 条件付き安定)
 ```cpp
-enum class AdvectionScheme { UPWIND1, LAX_WENDROFF, QUICK };
-AdvectionScheme advection = AdvectionScheme::UPWIND1;
-```
-
-**難易度**: 易〜中 (1〜3時間)
-
----
-
-### D. 圧力ソルバーを高速化したい
-
-**現状**: CG法 O(N^{1.5}) 程度。N=25×20×12≈6000なら十分速い。  
-格子を大きくする (100×80×50≈400,000セル) と数十秒かかる。
-
-**選択肢**:
-
-#### FFTベース (直交格子+均一BC専用)
-全境界がDirichletなら `FFTW3` ライブラリを使い O(N log N) で解ける。
-`PoissonSolver` を差し替えるだけ。
-
-```cpp
-// PoissonSolver の派生クラス or 別実装
-class FFTPoissonSolver {
-    fftw_plan plan_r2c, plan_c2r;
-public:
-    double solve(Grid& grid, const std::vector<double>& rhs);
-};
-```
-
-`CMakeLists.txt` に `find_package(FFTW3)` を追加。
-
-#### マルチグリッド (境界条件非依存)
-収束が O(N) 。実装は重いが長期的に推奨。
-既存ライブラリ: Hypre, AMGcl, もしくは Gauss-Seidel + V-cycle を手書き。
-
-**難易度**: FFT=中, マルチグリッド=難
-
----
-
-### E. 並列化したい (OpenMP)
-
-`FluidSolver.cpp` の内側ループにOpenMP追加:
-
-```cpp
-// FluidSolver.cpp - compute_intermediate() の u* 計算
-#pragma omp parallel for collapse(3) schedule(static)
-for (int i = 1; i < grid_.Nx; i++)
-for (int j = 0; j < grid_.Ny; j++)
-for (int k = 0; k < grid_.Nz; k++) {
-    ...
+static inline double lax_wendroff_adv(double phi_m, double phi_c, double phi_p,
+                                       double uc, double h, double dt) {
+    double flux_r = 0.5*uc*(phi_p+phi_c) - 0.5*uc*uc*dt/h*(phi_p-phi_c);
+    double flux_l = 0.5*uc*(phi_c+phi_m) - 0.5*uc*uc*dt/h*(phi_c-phi_m);
+    return (flux_r - flux_l) / h;
 }
 ```
 
-`CMakeLists.txt` に追加:
-```cmake
-find_package(OpenMP REQUIRED)
-target_link_libraries(_ffroom_core PRIVATE OpenMP::OpenMP_CXX)
+境界セル (i=1, i=Nx-1 など) では1次にフォールバック。
+
+---
+
+### D. 圧力ソルバーを高速化したい — マルチグリッド実装済み
+
+**実装済み**: `poisson_method: multigrid` で V-cycle Gauss-Seidel ソルバーに切り替えられる。
+25×20×12格子で **CG比約5倍高速** (2.25s → 0.44s)。
+
+**設定**:
+
+```yaml
+solver:
+  poisson_method: multigrid   # cg (デフォルト) | multigrid
 ```
 
-Poissonのコードはデータ依存があるためCGのdot product部分のみ並列化可能。
+**実装の場所**:
 
-**難易度**: 易 (1時間)
+| ファイル | 役割 |
+|---------|------|
+| `cpp/src/core/PoissonSolver.hpp` | `MultigridPoissonSolver` クラス宣言 |
+| `cpp/src/core/PoissonSolver.cpp` | V-cycle: `smooth()` (Gauss-Seidel), `restrict_residual()` (injection), `prolongate()` (nearest-neighbor), `compute_residual()` |
+| `cpp/src/core/FluidSolver.hpp` | `FluidSolverParams.use_multigrid`, `multigrid_poisson_` メンバ |
+| `cpp/src/core/FluidSolver.cpp` | step()内: `use_multigrid ? multigrid_poisson_.solve() : poisson_.solve()` |
+| `python/ff_room/config.py` | `SolverConfig.poisson_method: str = "cg"` |
+| `python/ff_room/solver_bridge.py` | `params.use_multigrid = (sc.poisson_method == 'multigrid')` |
+
+**残る選択肢** (将来): FFTベース O(N log N) — FFTW3が必要、全境界Dirichlet専用。
+
+---
+
+### E. 並列化したい (OpenMP) — 実装済み
+
+**実装済み**: `solver.parallel: true` で移流・拡散ループが OpenMP 並列実行される。
+
+**実装の場所**:
+
+| ファイル | 役割 |
+|---------|------|
+| `cpp/src/core/FluidSolver.cpp` | `#pragma omp parallel for collapse(3) schedule(static) if(params_.use_openmp)` を各主要ループに追加 |
+| `cpp/CMakeLists.txt` | `find_package(OpenMP)` (グレースフルフォールバック付き), `FFROOM_HAS_OPENMP` define, `OpenMP::OpenMP_CXX` リンク |
+| `python/ff_room/config.py` | `SolverConfig.parallel: bool = False` |
+| `python/ff_room/solver_bridge.py` | `_apply_solver_flags()`: `params.use_openmp = bool(sc.parallel)` |
+
+**設定**:
+
+```yaml
+solver:
+  parallel: true   # false がデフォルト
+```
+
+OpenMP が利用できない環境では自動的にシングルスレッドにフォールバックする。  
+Poissonソルバー (CG/マルチグリッド) はデータ依存があるため並列化対象外。
+
+CMake ビルドログで確認:
+```
+OpenMP found — enabling parallelization   # 有効
+OpenMP not found — building without parallelization  # フォールバック
+```
 
 ---
 
@@ -318,24 +361,31 @@ display(widgets.VBox([fan_vel, fan_x, run_btn, out]))
 
 ---
 
-### G. 非均一格子 (壁面付近を細かくしたい)
+### G. 非均一格子 (壁面付近を細かくしたい) — 実装済み
 
-現状は均一格子。壁面境界層を解像したい場合は格子を引き伸ばす。
+**実装済み**: `room.stretch > 1.0` で幾何学的格子伸張が有効になる。
+Nx/Ny/Nz は変わらないため計算量は増えない。
 
-**必要な変更** (`Grid.hpp`):
+**設定**:
 
-```cpp
-// 均一: dx = Lx/Nx
-// 非均一: x[i] を任意の座標列に変更
-std::vector<double> x_face;  // x-面の座標列 (長さ Nx+1)
-std::vector<double> y_face;
-std::vector<double> z_face;
-std::vector<double> dx_cell; // dx[i] = x_face[i+1] - x_face[i]
+```yaml
+room:
+  stretch: 1.1    # 壁面付近を軽く細分化 (推奨: 1.05〜1.2)
+  # stretch: 1.3  # 強い細分化
 ```
 
-差分演算子すべてを `dx` → `dx_cell[i]` に変更する (大規模な変更)。
+**実装の場所**:
 
-**代替案**: 格子を細かくしてセル数を増やす (実装変更なしで可)。
+| ファイル | 役割 |
+|---------|------|
+| `cpp/src/core/Grid.hpp/.cpp` | `dxv[Nx]`, `dyv[Ny]`, `dzv[Nz]` (可変セルサイズ), `xs[Nx+1]` 等の面座標, `set_face_coords()` |
+| `cpp/src/core/FluidSolver.cpp` | 移流・拡散・Poisson RHS・補正・発散計算すべてに `dxv[i]`/`dyv[j]`/`dzv[k]` を使用 |
+| `cpp/src/core/PoissonSolver.cpp` | 非均一Laplacianステンシル: `scale = 1/(h_face * dx_cell)` |
+| `python/ff_room/config.py` | `RoomConfig.stretch: float = 1.0` |
+| `python/ff_room/scene.py` | `_stretched_faces(N, L, r)` — 対称幾何学伸張, `Scene._build()` で `set_face_coords()` 呼び出し |
+
+**注意**: stretch格子では圧力ソルバーの条件数が悪化するため、
+`poisson_method: multigrid` との組み合わせを推奨。
 
 ---
 
@@ -360,28 +410,43 @@ def save_hdf5(result: SimResult, path: str) -> None:
 
 ---
 
-### I. LBM (Lattice Boltzmann Method) に切り替えたい
+### I. LBM (Lattice Boltzmann Method) に切り替えたい — 実装済み
 
-**現状の射影法との比較**:
+**実装済み**: `solver.method: lbm` で D3Q19 BGK LBM ソルバーに切り替えられる。
 
-| 項目 | 射影法 (現状) | LBM D3Q19 |
-|------|------------|-----------|
-| 実装難易度 | 中 | 中 |
-| 並列化 | OpenMP容易 | 非常に容易 |
-| 圧縮性 | 非圧縮 | 弱圧縮性 |
+**射影法との比較**:
+
+| 項目 | 射影法 | LBM D3Q19 |
+|------|--------|-----------|
+| 並列化 | OpenMP | 非常に容易 (セル独立) |
+| 圧縮性 | 非圧縮 | 弱圧縮性 (div_max高め) |
+| 温度計算 | 対応 | 非対応 (等温のみ) |
 | 境界条件 | 自然 | bounce-back (簡潔) |
-| 複雑形状 | やや複雑 | 容易 |
-| メモリ | 低 | 高 (19分布関数) |
+| メモリ | 低 | 高 (19分布関数×格子) |
+| 収束速度 | ~529 steps | ~119 steps (basic_room) |
 
-LBMに切り替える場合: `cpp/src/core/` に `LBMSolver.hpp/.cpp` を新規作成し、
-`FluidSolver` と同じインターフェース (`step()`, `run()`) を持たせる。
-`SolverBridge` 側でソルバー種別を切り替えるだけで Python 側の変更なし。
+**設定**:
 
 ```yaml
 solver:
-  method: lbm   # "projection" (default) | "lbm"
-  tau: 0.8      # LBM緩和時間 (0.5 < τ < 2.0 が安定)
+  method: lbm
+  tau: 0.8        # 緩和時間 (0.5 < τ < 2.0 が安定)
+  max_steps: 500  # LBMは射影法より少ないstepで収束することが多い
 ```
+
+**実装の場所**:
+
+| ファイル | 役割 |
+|---------|------|
+| `cpp/src/core/LBMSolver.hpp` | クラス宣言, D3Q19格子定数, 物理↔格子単位変換 |
+| `cpp/src/core/LBMSolver.cpp` | BGK衝突, streaming (double-buffer), bounce-back BC, 流入eq初期化, 流出ゼロ勾配BC, マクロ変数抽出 |
+| `cpp/CMakeLists.txt` | `LBMSolver.cpp` を `CORE_SOURCES` に追加 |
+| `cpp/src/bindings/module.cpp` | `LBMSolver` pybind11バインディング |
+| `python/ff_room/config.py` | `SolverConfig.method = "lbm"`, `SolverConfig.tau = 0.8` |
+| `python/ff_room/solver_bridge.py` | `sc.method == 'lbm'` → `LBMSolver(g, bm, sc.tau, ...)` |
+
+**注意**: LBMは `div_max` が射影法より高くなる (弱圧縮性のため)。
+`T_field` は zeros、`buoyancy` は無効。温度シミュレーションには射影法を使うこと。
 
 ---
 

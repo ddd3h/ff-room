@@ -14,8 +14,11 @@ import yaml
 @dataclass
 class RoomConfig:
     """Axis-aligned rectangular room."""
-    size: Tuple[float, float, float] = (5.0, 4.0, 2.5)  # Lx, Ly, Lz [m]
-    grid: Tuple[int, int, int]       = (25, 20, 12)      # Nx, Ny, Nz cells
+    size:    Tuple[float, float, float] = (5.0, 4.0, 2.5)  # Lx, Ly, Lz [m]
+    grid:    Tuple[int, int, int]       = (25, 20, 12)      # Nx, Ny, Nz cells
+    stretch: float                      = 1.0  # grid stretch ratio near walls
+    # stretch=1.0: uniform (default). >1.0: geometric refinement near walls.
+    # e.g. stretch=1.3 gives ~3x finer cells at walls vs. room center.
 
 
 @dataclass
@@ -24,8 +27,8 @@ class FanConfig:
 
     position: center of fan face [m] in room coordinates
     direction: blowing direction as (azimuth_deg, elevation_deg)
-               azimuth: 0=+x, 90=+y; elevation: 0=horizontal, 90=up
-               MVP: axis-aligned only (direction snapped to nearest axis)
+               azimuth: 0=+x, 90=+y, 180=-x, 270=-y; elevation: 0=horizontal, 90=up
+               Full 3-component oblique directions supported.
     velocity:  bulk inflow speed [m/s]
     radius:    half-width of fan face [m] (square patch: side = 2*radius)
     """
@@ -88,7 +91,34 @@ class OpeningConfig:
 
 @dataclass
 class SolverConfig:
-    """Numerical solver parameters."""
+    """Numerical solver parameters.
+
+    Each option is an independent toggle — combine freely:
+
+      method:         "projection" (default) | "lbm"
+                      projection = Chorin's projection method (MAC grid, CG/multigrid Poisson)
+                      lbm        = D3Q19 BGK Lattice Boltzmann (isothermal, bounce-back BCs)
+      tau:            LBM relaxation time; 0.5 < τ < 2.0 (method="lbm" only, default 0.8)
+
+      advection:      "upwind" (default) | "quick" | "lax_wendroff"
+                      upwind       = 1st-order upwind (fast, diffusive)
+                      quick        = 3rd-order QUICK (accurate, same cost)
+                      lax_wendroff = 2nd-order Lax-Wendroff (accurate, conditionally stable)
+                      (projection method only; ignored for lbm)
+
+      parallel:       False (default) | True
+                      True = OpenMP multi-thread on advection/diffusion loops
+                      (projection method only; silently ignored for lbm)
+
+      poisson_method: "cg" (default) | "multigrid"
+                      cg        = Conjugate Gradient O(N^1.5) — robust
+                      multigrid = V-cycle Gauss-Seidel O(N)   — ~5x faster on large grids
+                      (projection method only; ignored for lbm)
+
+    Grid refinement (in RoomConfig):
+      room.stretch:   1.0 (default, uniform) | >1.0 geometric wall refinement
+                      e.g. 1.1 = mild refinement, 1.3 = strong refinement near all walls
+    """
     dt:               float = 0.01    # time step [s]
     max_steps:        int   = 1000    # max iterations
     convergence_tol:  float = 1.0     # max |u_new - u_old| / dt
@@ -96,7 +126,14 @@ class SolverConfig:
     nu:               float = 1.5e-5  # kinematic viscosity [m2/s]
     poisson_max_iter: int   = 1000
     poisson_tol:      float = 1e-6
-    # Thermal simulation
+    # --- Solver selection ---
+    method:         str   = "projection"  # "projection" | "lbm"
+    tau:            float = 0.8           # LBM relaxation time (lbm only)
+    # --- Projection-method sub-options ---
+    advection:      str   = "upwind"      # "upwind" | "quick" | "lax_wendroff"
+    parallel:       bool  = False         # True = OpenMP on
+    poisson_method: str   = "cg"          # "cg" | "multigrid"
+    # --- Thermal simulation ---
     T_initial:    float = 20.0        # initial indoor temperature [°C]
     T_outside:    float = 20.0        # outdoor temperature [°C]
     T_target:     float = None        # type: ignore[assignment]  stop at this mean T [°C]

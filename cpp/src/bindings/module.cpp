@@ -7,12 +7,20 @@
 #include "../core/PoissonSolver.hpp"
 #include "../core/BoundaryManager.hpp"
 #include "../core/FluidSolver.hpp"
+#include "../core/LBMSolver.hpp"
 
 namespace py = pybind11;
 using namespace ffroom;
 
 PYBIND11_MODULE(_ffroom_core, m) {
     m.doc() = "ff-room CFD core (projection method on MAC grid)";
+
+    // AdvectionScheme enum
+    py::enum_<AdvectionScheme>(m, "AdvectionScheme")
+        .value("UPWIND1",      AdvectionScheme::UPWIND1)
+        .value("QUICK",        AdvectionScheme::QUICK)
+        .value("LAX_WENDROFF", AdvectionScheme::LAX_WENDROFF)
+        .export_values();
 
     // CellType enum
     py::enum_<CellType>(m, "CellType")
@@ -79,6 +87,14 @@ PYBIND11_MODULE(_ffroom_core, m) {
             std::memcpy(arr.mutable_data(), ct.data(), ct.size());
             return arr;
         })
+        .def("xs", [](Grid& g) {
+            return py::array_t<double>({g.Nx+1}, g.xs.data(), py::cast(g)); })
+        .def("ys", [](Grid& g) {
+            return py::array_t<double>({g.Ny+1}, g.ys.data(), py::cast(g)); })
+        .def("zs", [](Grid& g) {
+            return py::array_t<double>({g.Nz+1}, g.zs.data(), py::cast(g)); })
+        .def("set_face_coords", &Grid::set_face_coords,
+             py::arg("xs"), py::arg("ys"), py::arg("zs"))
         .def("zero_velocity", &Grid::zero_velocity)
         .def("zero_pressure", &Grid::zero_pressure);
 
@@ -141,6 +157,9 @@ PYBIND11_MODULE(_ffroom_core, m) {
         .def_readwrite("max_steps",        &FluidSolverParams::max_steps)
         .def_readwrite("convergence_tol",  &FluidSolverParams::convergence_tol)
         .def_readwrite("poisson",          &FluidSolverParams::poisson)
+        .def_readwrite("advection",        &FluidSolverParams::advection)
+        .def_readwrite("use_openmp",       &FluidSolverParams::use_openmp)
+        .def_readwrite("use_multigrid",    &FluidSolverParams::use_multigrid)
         // Thermal
         .def_readwrite("thermal",          &FluidSolverParams::thermal)
         .def_readwrite("T_initial",        &FluidSolverParams::T_initial)
@@ -178,4 +197,14 @@ PYBIND11_MODULE(_ffroom_core, m) {
              py::arg("callback") = nullptr)
         .def("compute_divergence_max", &FluidSolver::compute_divergence_max)
         .def_property_readonly("current_step", &FluidSolver::current_step);
+
+    // LBMSolver — D3Q19 Lattice Boltzmann Method solver
+    py::class_<LBMSolver>(m, "LBMSolver")
+        .def(py::init<Grid&, BoundaryManager&, double, int, double, double>(),
+             py::arg("grid"), py::arg("bm"), py::arg("tau"),
+             py::arg("max_steps"), py::arg("convergence_tol"),
+             py::arg("dt") = 0.01)
+        .def("step", &LBMSolver::step)
+        .def("run",  &LBMSolver::run, py::arg("callback") = nullptr)
+        .def("compute_divergence_max", &LBMSolver::compute_divergence_max);
 }

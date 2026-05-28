@@ -267,6 +267,143 @@ solver:
 
 ---
 
+## 2-7. ソルバーオプション設定
+
+各オプションは独立したフィールドで制御できる。組み合わせも自由。
+
+### ソルバーアルゴリズム (`method`)
+
+```yaml
+solver:
+  method: projection   # デフォルト: 射影法 (MAC格子, CG/マルチグリッド圧力ソルバー)
+  # method: lbm        # D3Q19 BGK Lattice Boltzmann法 (等温, bounce-back境界)
+```
+
+| method | 特徴 | 用途 |
+|--------|------|------|
+| `projection` | 非圧縮, 温度計算対応, Poissonソルバー | 標準・推奨 |
+| `lbm` | 弱圧縮性, 等温のみ, 並列化容易 | 複雑形状・高速プロトタイプ |
+
+LBM使用時は `tau` (緩和時間) も設定可能 (0.5 < τ < 2.0):
+```yaml
+solver:
+  method: lbm
+  tau: 0.8   # デフォルト。τ=1/√3 + 0.5 ≈ 1.08 で安定
+  max_steps: 500
+```
+
+---
+
+### 移流スキーム (`advection`)
+
+```yaml
+solver:
+  advection: upwind        # デフォルト: 1次精度, 安定, 数値拡散あり
+  # advection: quick       # 3次精度 QUICK: 数値拡散を低減 (推奨)
+  # advection: lax_wendroff # 2次精度: 境界付近で1次にフォールバック
+```
+
+| advection | 精度 | 計算コスト | 備考 |
+|-----------|------|-----------|------|
+| `upwind` | 1次 | 基準 | 安定, 数値拡散大 |
+| `quick` | 3次 | ≒同等 | 精度/コスト最良 |
+| `lax_wendroff` | 2次 | ≒同等 | 条件付き安定 |
+
+(`method: lbm` 時は無視)
+
+---
+
+### OpenMP並列化 (`parallel`)
+
+```yaml
+solver:
+  parallel: false   # デフォルト: シングルスレッド
+  # parallel: true  # マルチコアで高速化 (移流・拡散ループ)
+```
+
+- `true` にするとマルチコアCPUで移流・拡散ループが並列実行される
+- ビルド時に OpenMP が見つからない場合はシングルスレッドにフォールバック
+- Poisson ソルバー (CG/マルチグリッド) はデータ依存のため対象外
+- (LBM時は無視)
+
+---
+
+### 圧力ソルバー (`poisson_method`)
+
+```yaml
+solver:
+  poisson_method: cg          # デフォルト: 共役勾配法 O(N^1.5)
+  # poisson_method: multigrid  # マルチグリッドV-cycle O(N) — 約5倍高速
+```
+
+| poisson_method | アルゴリズム | 計算量 | 用途 |
+|----------------|------------|--------|------|
+| `cg` | 共役勾配法 | O(N^1.5) | 標準・安定 |
+| `multigrid` | V-cycle Gauss-Seidel | O(N) | 高解像度格子で有効 |
+
+(LBM時は無視 — LBMに圧力Poissonソルバーなし)
+
+---
+
+### 格子細分化 (`room.stretch`)
+
+```yaml
+room:
+  stretch: 1.0    # デフォルト: 均一格子
+  # stretch: 1.1  # 壁面付近を軽く細分化
+  # stretch: 1.3  # 壁面付近を強く細分化 (境界層解像向け)
+```
+
+壁面付近のセルが細かくなり、室内中央のセルは相対的に粗くなる幾何学的格子伸張。
+Nx, Ny, Nz は変わらないため計算量は増えない。
+
+---
+
+### 組み合わせ例
+
+```yaml
+# 精度重視 + 並列化 (推奨バランス)
+solver:
+  method: projection
+  advection: quick
+  parallel: true
+  poisson_method: multigrid
+
+# 高速プロトタイプ (LBM)
+solver:
+  method: lbm
+  tau: 0.8
+  max_steps: 300
+
+# 壁面境界層を解像したい
+solver:
+  advection: quick
+  poisson_method: multigrid   # stretch格子で圧力収束を助ける
+room:
+  stretch: 1.15
+```
+
+Pythonから直接設定:
+
+```python
+from ff_room import SceneConfig, SolverBridge
+
+config = SceneConfig.load_yaml("my_room.yaml")
+
+# QUICK + OpenMP + multigrid
+config.solver.advection      = "quick"
+config.solver.parallel       = True
+config.solver.poisson_method = "multigrid"
+
+# または LBM
+config.solver.method = "lbm"
+config.solver.tau    = 0.8
+
+result = SolverBridge(config).run()
+```
+
+---
+
 ## 3. シミュレーション実行
 
 ### Pythonスクリプトから
@@ -332,6 +469,76 @@ config.fans[0].position = (1.0, 2.0, 1.2)
 config.fans[0].velocity = 4.0
 result2 = SolverBridge(config).run()
 ```
+
+---
+
+## 3-2. アニメーション / 動画書き出し
+
+シミュレーション中のフィールド変化を GIF または MP4 動画として保存できる。
+
+### 基本的な使い方 (GIF)
+
+```python
+from ff_room import SceneConfig, SolverBridge, Animator
+
+config = SceneConfig.load_yaml("my_room.yaml")
+config.solver.max_steps = 500
+
+# run_animated() でスナップショットを収集しながら実行
+result, snapshots = SolverBridge(config).run_animated(
+    save_every=25,        # 25 ステップごとにスナップショットを保存
+    print_interval=50,    # 50 ステップごとに進捗を表示
+)
+
+print(f"スナップショット数: {len(snapshots)}")
+print(f"最終ステップ: {result.steps}, 収束: {result.converged}")
+
+# Animator で GIF に書き出す (Pillow が必要)
+anim = Animator(snapshots, config)
+anim.save_gif("results/flow_animation.gif", fps=10, dpi=100)
+```
+
+### MP4 動画の書き出し
+
+```python
+# MP4 (ffmpeg が必要; 未インストールの場合は GIF に自動フォールバック)
+anim.save_mp4("results/flow_animation.mp4", fps=15, dpi=120)
+```
+
+### 温度シミュレーションの場合
+
+```python
+config = SceneConfig.load_yaml("examples/summer_cooling.yaml")
+result, snapshots = SolverBridge(config).run_animated(save_every=100)
+
+# 温度変化が 0.1°C 以上あると右パネルが温度カラーマップ (RdBu_r) になる
+Animator(snapshots, config).save_gif("results/cooling.gif", fps=5)
+```
+
+### `FieldSnapshot` の中身
+
+各スナップショットには以下のフィールドが含まれる:
+
+```python
+snap = snapshots[0]
+snap.step     # int: ソルバーステップ番号
+snap.time_s   # float: 物理時間 = step * dt [s]
+snap.T_mean   # float: 室内平均温度 [°C]
+snap.speed    # ndarray (Nx, Ny, Nz): 速度スカラー [m/s]
+snap.T_field  # ndarray (Nx, Ny, Nz): 温度場 [°C]
+snap.vel      # ndarray (Nx, Ny, Nz, 3): 速度ベクトル [m/s]
+```
+
+### 動画内容
+
+| パネル | 内容 |
+|--------|------|
+| 左 (Top view) | XY 断面 (z=中央高さ) の速度カラーマップ + 方向矢印 |
+| 右 (Side view) | YZ 断面 (x=中央) の速度 or 温度カラーマップ |
+
+**パッケージ要件**:
+- GIF: `pip install Pillow`
+- MP4: システムに `ffmpeg` が必要 (`apt install ffmpeg` など)
 
 ---
 

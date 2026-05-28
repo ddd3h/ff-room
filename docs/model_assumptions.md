@@ -95,15 +95,41 @@ u^{n+1} = u^n + dt * RHS(u^n)
 
 陽的スキームのため CFL 条件を満たす dt が必要。
 
-### 3-3. 移流項: 1次精度 Upwind
+### 3-3. 移流項: 選択可能スキーム (デフォルト: 1次精度 Upwind)
 
+**デフォルト (UPWIND1, `solver.mode: standard`)**:
 ```
 u ∂φ/∂x ≈ u × (φ_i - φ_{i-1})/dx  (u > 0)
            u × (φ_{i+1} - φ_i)/dx  (u < 0)
 ```
+**特性**: 無条件単調、数値拡散が強い (有効拡散 ≈ |u|×dx/2)。
 
-**特性**: 無条件単調、数値拡散が強い (有効拡散 ≈ |u|×dx/2)。  
-高精度化: QUICK / Lax-Wendroff への切り替えは developer_guide.md 参照。
+---
+
+**QUICK スキーム (3次精度 upwind-biased, `solver.mode: accurate`)**:
+
+面値を上流3点の加重平均で推定する:
+```
+u ≥ 0: φ_face = (6φ_c + 3φ_p - φ_mm) / 8
+u < 0: φ_face = (6φ_m + 3φ_mm - φ_p) / 8
+```
+ここで φ_c = 中心セル, φ_m = 上流セル, φ_mm = 2つ上流のセル, φ_p = 下流セル。  
+境界セル (格子端) では 1次 Upwind に自動フォールバック。
+
+**特性**: 数値拡散が 1次 Upwind より大幅に小さい。CFL ≤ 1 で安定。  
+実装: `cpp/src/core/FluidSolver.cpp` の `quick_adv()` ヘルパー。
+
+---
+
+**Lax-Wendroff スキーム (2次精度, 条件付き安定)**:
+```
+flux_r = 0.5×u×(φ_{i+1}+φ_i) - 0.5×u²×dt/dx×(φ_{i+1}-φ_i)
+flux_l = 0.5×u×(φ_i+φ_{i-1}) - 0.5×u²×dt/dx×(φ_i-φ_{i-1})
+u ∂φ/∂x ≈ (flux_r - flux_l) / dx
+```
+**特性**: 2次精度だが振動しやすい (単調性なし)。CFL ≤ 1 が必要。  
+実装: `cpp/src/core/FluidSolver.cpp` の `lax_wendroff_adv()` ヘルパー。  
+Python から: `AdvectionScheme.LAX_WENDROFF` を直接 `FluidSolverParams.advection` に設定。
 
 ### 3-4. 拡散項: 2次精度中心差分
 
@@ -132,6 +158,25 @@ u ∂φ/∂x ≈ u × (φ_i - φ_{i-1})/dx  (u > 0)
 - 前処理なし (将来: Jacobi 前処理または不完全 LU)
 - 初期推定: p = 0
 - 収束判定: ||r||₂ / ||b||₂ < tol (デフォルト tol = 1×10⁻⁶)
+
+### 3-7. 並列化: OpenMP (オプション)
+
+`FluidSolverParams.use_openmp = true` のとき (`solver.mode: fast`)、
+`compute_intermediate()` および `advect_temperature()` の内側ループを OpenMP で並列実行する。
+
+```cpp
+#pragma omp parallel for collapse(3) schedule(static) if(params_.use_openmp)
+for (int i = ...) for (int j = ...) for (int k = ...) { ... }
+```
+
+**対象ループ**: 速度中間値 (u*, v*, w*) と温度 advection-diffusion ステップ。  
+**対象外**: Poisson CG ソルバー (行列-ベクトル積にデータ依存あり)。
+
+**グレースフルフォールバック**: ビルド時に OpenMP が見つからない場合は
+`FFROOM_HAS_OPENMP` マクロが未定義のままとなり、プラグマは無視されてシングルスレッドで動作する。
+
+実装: `cpp/CMakeLists.txt` の `find_package(OpenMP)` + `target_link_libraries(...OpenMP::OpenMP_CXX)`,
+`cpp/src/core/FluidSolver.cpp`。
 
 ---
 
@@ -238,7 +283,7 @@ scene.py は自動アウトフロー (内壁全面を OUTFLOW とするデフォ
 ## 8. 既知の制限事項
 
 1. **乱流モデルなし**: 格子スケール以下の渦は解像されない。結果は定性的指標として使用する
-2. **1次 Upwind 移流**: 数値拡散により、鋭い流れ境界が拡散する (温度場も同様)
+2. **移流スキーム**: デフォルト (1次 Upwind) は数値拡散が強い。`solver.mode: accurate` で QUICK (3次精度) に切り替え可能
 3. **扇風機の一様流入近似**: 実際の速度プロファイルと異なる
 4. **陽的時間積分**: 大きい dt で発散する (CFL 条件)
 5. **Boussinesq近似**: 密度変化を浮力のみに限定。大きな温度差 (>20°C) では誤差が増える

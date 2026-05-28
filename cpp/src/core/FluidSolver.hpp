@@ -6,6 +6,8 @@
 
 namespace ffroom {
 
+enum class AdvectionScheme { UPWIND1 = 0, QUICK = 1, LAX_WENDROFF = 2 };
+
 struct FluidSolverParams {
     double rho     = 1.2;     // air density [kg/m3]
     double nu      = 1.5e-5;  // kinematic viscosity [m2/s] (air at 20°C)
@@ -14,6 +16,15 @@ struct FluidSolverParams {
     double convergence_tol = 1.0;  // max |u_new - u_old| / dt for steady-state
 
     PoissonSolverParams poisson;
+
+    // Advection scheme (default UPWIND1 preserves existing behavior)
+    AdvectionScheme advection = AdvectionScheme::UPWIND1;
+
+    // OpenMP parallelization (default false preserves existing behavior)
+    bool use_openmp = false;
+
+    // Use multigrid V-cycle solver instead of CG for pressure Poisson
+    bool use_multigrid = false;
 
     // Thermal simulation
     bool   thermal     = false;       // enable temperature advection-diffusion
@@ -55,7 +66,8 @@ private:
     Grid&            grid_;
     BoundaryManager& bm_;
     FluidSolverParams params_;
-    PoissonSolver     poisson_;
+    PoissonSolver             poisson_;
+    MultigridPoissonSolver    multigrid_poisson_;
     int               step_ = 0;
 
     std::vector<double> u_prev_, v_prev_, w_prev_;

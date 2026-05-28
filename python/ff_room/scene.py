@@ -31,6 +31,34 @@ def _load_core():
             ) from e
 
 
+def _stretched_faces(N: int, L: float, r: float) -> list:
+    """Face coordinates for N cells of length L with geometric stretch ratio r.
+
+    r=1.0: uniform.  r>1.0: finer cells near both walls (symmetric).
+    Example: r=1.3 gives ~3x finer cells at walls vs. room center.
+    """
+    if abs(r - 1.0) < 1e-6:
+        return [i * L / N for i in range(N + 1)]
+    n_half = N // 2
+    # Geometric series summing to L/2:  dx1 * (r^n_half - 1)/(r-1) = L/2
+    dx1 = (L / 2.0) * (r - 1.0) / (r**n_half - 1.0)
+    # Left half: wall → center (increasing cell sizes)
+    faces = [0.0]
+    for i in range(n_half):
+        faces.append(faces[-1] + dx1 * r**i)
+    # Right half: center → wall (mirror of left)
+    dxs = [faces[i+1] - faces[i] for i in range(n_half)]
+    for dx in reversed(dxs):
+        faces.append(faces[-1] + dx)
+    # Odd N: insert midpoint cell
+    if N % 2 == 1:
+        mid = n_half
+        faces.insert(mid + 1, (faces[mid] + faces[mid + 1]) / 2.0)
+    # Normalize to exactly L
+    scale = L / faces[-1]
+    return [f * scale for f in faces]
+
+
 class Scene:
     """Assembled simulation scene backed by C++ Grid and BoundaryManager."""
 
@@ -49,6 +77,15 @@ class Scene:
             r.grid[0], r.grid[1], r.grid[2],
             r.size[0], r.size[1], r.size[2],
         )
+
+        # Apply non-uniform grid stretching near walls if requested
+        stretch = getattr(r, 'stretch', 1.0) or 1.0
+        if stretch > 1.0 + 1e-6:
+            xs = _stretched_faces(r.grid[0], r.size[0], stretch)
+            ys = _stretched_faces(r.grid[1], r.size[1], stretch)
+            zs = _stretched_faces(r.grid[2], r.size[2], stretch)
+            self.grid.set_face_coords(xs, ys, zs)
+
         self.bm = self._c.BoundaryManager()
 
         for obs in cfg.obstacles:
@@ -110,21 +147,24 @@ class Scene:
     def _add_fan(self, fan: FanConfig) -> None:
         g  = self.grid
         r  = self.config.room
-        ax = fan.snapped_axis()
+        ax = fan.snapped_axis()  # dominant axis: inflow face placed here
         sg = fan.snapped_sign()
+        vx, vy, vz = fan.direction_vector()  # full 3-component unit vector
 
         def to_cell(x, L, N):   return int(x / L * N)
-        def to_cell_r(x, r, L, N):  # range from center ± radius
-            lo = max(0, int((x - r) / L * N))
-            hi = min(N-1, int((x + r) / L * N))
+        def to_cell_r(x, rd, L, N):
+            lo = max(0, int((x - rd) / L * N))
+            hi = min(N-1, int((x + rd) / L * N))
             return lo, hi
 
         cx, cy, cz = fan.position
         rad = fan.radius
 
         bc = self._c.FanBC()
+        # All three velocity components set — C++ apply_inflow() handles oblique flow.
+        bc.vel = [vx * fan.velocity, vy * fan.velocity, vz * fan.velocity]
 
-        if ax == 0:  # blowing in x
+        if ax == 0:  # dominant direction: x
             ix = to_cell(cx, r.size[0], r.grid[0])
             ix = max(0, min(r.grid[0]-1, ix))
             jlo, jhi = to_cell_r(cy, rad, r.size[1], r.grid[1])
@@ -132,8 +172,7 @@ class Scene:
             bc.i_min, bc.i_max = ix, ix
             bc.j_min, bc.j_max = jlo, jhi
             bc.k_min, bc.k_max = klo, khi
-            bc.vel = [sg * fan.velocity, 0.0, 0.0]
-        elif ax == 1:  # blowing in y
+        elif ax == 1:  # dominant direction: y
             ilo, ihi = to_cell_r(cx, rad, r.size[0], r.grid[0])
             jy = to_cell(cy, r.size[1], r.grid[1])
             jy = max(0, min(r.grid[1]-1, jy))
@@ -141,8 +180,7 @@ class Scene:
             bc.i_min, bc.i_max = ilo, ihi
             bc.j_min, bc.j_max = jy, jy
             bc.k_min, bc.k_max = klo, khi
-            bc.vel = [0.0, sg * fan.velocity, 0.0]
-        else:  # blowing in z
+        else:  # dominant direction: z
             ilo, ihi = to_cell_r(cx, rad, r.size[0], r.grid[0])
             jlo, jhi = to_cell_r(cy, rad, r.size[1], r.grid[1])
             kz = to_cell(cz, r.size[2], r.grid[2])
@@ -150,7 +188,6 @@ class Scene:
             bc.i_min, bc.i_max = ilo, ihi
             bc.j_min, bc.j_max = jlo, jhi
             bc.k_min, bc.k_max = kz, kz
-            bc.vel = [0.0, 0.0, sg * fan.velocity]
 
         self.bm.add_fan(self.grid, bc)
 
