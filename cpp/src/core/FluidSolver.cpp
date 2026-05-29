@@ -9,10 +9,16 @@
 
 namespace ffroom {
 
+static PoissonSolverParams make_poisson_params(const FluidSolverParams& fp) {
+    auto p = fp.poisson;
+    p.use_openmp = fp.use_openmp;
+    return p;
+}
+
 FluidSolver::FluidSolver(Grid& grid, BoundaryManager& bm, FluidSolverParams params)
     : grid_(grid), bm_(bm), params_(params),
-      poisson_(params.poisson),
-      multigrid_poisson_(params.poisson)
+      poisson_(make_poisson_params(params)),
+      multigrid_poisson_(make_poisson_params(params))
 {
     u_prev_.resize(grid.u.size());
     v_prev_.resize(grid.v.size());

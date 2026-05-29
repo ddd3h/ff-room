@@ -2,6 +2,9 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#ifdef FFROOM_HAS_OPENMP
+#include <omp.h>
+#endif
 
 namespace ffroom {
 
@@ -23,6 +26,9 @@ void PoissonSolver::apply_laplacian(const Grid& g, const std::vector<double>& x,
     //   scale_l = 1/(dx_left  * dx_cell),  dx_left  = (dxv[i-1]+dxv[i])/2
     // For uniform grid (all dxv[i]=dx): scale = 1/dx², recovering original behavior.
 
+#ifdef FFROOM_HAS_OPENMP
+    #pragma omp parallel for schedule(static) if(params_.use_openmp)
+#endif
     for (int i = 0; i < g.Nx; i++) {
         // Face-to-face distances (cell-center to cell-center)
         double hxl = (i > 0)      ? 0.5*(g.dxv[i-1]+g.dxv[i]) : g.dxv[i];
@@ -100,6 +106,9 @@ double PoissonSolver::solve(Grid& grid, const std::vector<double>& rhs) {
     }
 
     double rr = 0.0;
+#ifdef FFROOM_HAS_OPENMP
+    #pragma omp parallel for reduction(+:rr) schedule(static) if(params_.use_openmp)
+#endif
     for (int i = 0; i < N; i++) rr += r[i]*r[i];
     double rhs_norm = std::sqrt(rr);
     if (rhs_norm < 1e-15) {
@@ -111,11 +120,17 @@ double PoissonSolver::solve(Grid& grid, const std::vector<double>& rhs) {
         apply_laplacian(grid, d, Ad);
 
         double dAd = 0.0;
+#ifdef FFROOM_HAS_OPENMP
+        #pragma omp parallel for reduction(+:dAd) schedule(static) if(params_.use_openmp)
+#endif
         for (int i = 0; i < N; i++) dAd += d[i]*Ad[i];
         if (std::abs(dAd) < 1e-30) break;
 
         double alpha = rr / dAd;
         double rr_new = 0.0;
+#ifdef FFROOM_HAS_OPENMP
+        #pragma omp parallel for reduction(+:rr_new) schedule(static) if(params_.use_openmp)
+#endif
         for (int i = 0; i < N; i++) {
             x[i] += alpha * d[i];
             r[i] -= alpha * Ad[i];
@@ -130,6 +145,9 @@ double PoissonSolver::solve(Grid& grid, const std::vector<double>& rhs) {
         }
 
         double beta = rr_new / rr;
+#ifdef FFROOM_HAS_OPENMP
+        #pragma omp parallel for schedule(static) if(params_.use_openmp)
+#endif
         for (int i = 0; i < N; i++) d[i] = r[i] + beta * d[i];
         rr = rr_new;
     }

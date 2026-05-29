@@ -12,8 +12,9 @@ namespace ffroom {
 // Convergence: ||r||_2 / ||rhs||_2 < tol
 
 struct PoissonSolverParams {
-    int    max_iter = 1000;
-    double tol      = 1e-6;
+    int    max_iter   = 1000;
+    double tol        = 1e-6;
+    bool   use_openmp = false;
 };
 
 class PoissonSolver {
