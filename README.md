@@ -1,3 +1,6 @@
+
+![](docs/homeimg.png)
+
 # ff-room: 3D室内気流シミュレーション
 
 部屋に扇風機を置いたときの気流を3Dで可視化するCFDツール。
@@ -7,7 +10,6 @@
 **言語**: C++17 (ソルバー) + Python 3.9+ (UI・可視化)  
 **連携**: pybind11
 
----
 
 ## 目次
 
@@ -21,7 +23,6 @@
 - [テスト実行](#テスト実行)
 - [ドキュメント一覧](#ドキュメント一覧)
 
----
 
 ## インストール
 
@@ -50,7 +51,6 @@ pip install -e .
 `build.sh` は `cpp/build/` でcmakeを走らせ、生成した `_ffroom_core*.so` を
 `python/ff_room/` にインストールする。
 
----
 
 ## クイックスタート
 
@@ -78,7 +78,6 @@ viz.streamlines()          # 3D流線
 viz.slice_xz(y_frac=0.5)  # 中央垂直断面
 ```
 
----
 
 ## 設定ファイル
 
@@ -143,7 +142,6 @@ z (高さ・上)
 原点: 部屋の南西床角 (0, 0, 0)
 ```
 
----
 
 ## 可視化
 
@@ -152,31 +150,26 @@ from ff_room import Visualizer
 
 viz = Visualizer(result)
 
-# --- 断面スライス ---
-viz.slice_xy(z_frac=0.5)       # 水平断面 z=Lz/2
+# --- 断面スライス viz.slice_xy(z_frac=0.5)       # 水平断面 z=Lz/2
 viz.slice_xz(y_frac=0.5)       # 垂直断面 y=Ly/2
 viz.slice_yz(x_frac=0.5)       # 横断面   x=Lx/2
 
 # z_frac=0.0〜1.0 で断面位置を変える
 viz.slice_xy(z_frac=0.48)      # ほぼ床面近く
 
-# --- 流線 ---
-viz.streamlines(
+# --- 流線 viz.streamlines(
     source_center=(0.5, 2.0, 1.2),  # 種点の中心 (省略時: 最初の扇風機)
     n_points=50,
     max_time=50.0,
 )
 
-# --- ボリュームレンダリング ---
-viz.volume_speed()
+# --- ボリュームレンダリング viz.volume_speed()
 
-# --- 2×2まとめパネル ---
-viz.multi_panel()
+# --- 2×2まとめパネル viz.multi_panel()
 ```
 
 PyVistaウィンドウ: マウスドラッグで回転、スクロールでズーム。
 
----
 
 ## 結果の保存と再利用
 
@@ -216,7 +209,6 @@ plt.colorbar(label='speed [m/s]')
 plt.show()
 ```
 
----
 
 ## 実験ログ
 
@@ -239,7 +231,6 @@ for e in entries:
 
 ログはJSON Lines形式 (`.jsonl`)。設定の完全なスナップショットを含む。
 
----
 
 ## ディレクトリ構成
 
@@ -280,7 +271,6 @@ ff-room/
     └── developer_guide.md   ← 開発者ガイド (拡張方法)
 ```
 
----
 
 ## テスト実行
 
@@ -299,7 +289,6 @@ cmake .. -DBUILD_TESTS=ON
 make && ./ffroom_tests
 ```
 
----
 
 ## ドキュメント一覧
 
