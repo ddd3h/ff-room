@@ -197,6 +197,8 @@ void MultigridPoissonSolver::smooth(
                 for (int k = 0; k < Nz; k++) {
                     int c = cidx(i,j,k);
                     if (cell_type[c] == CellType::SOLID) continue;
+                    // OUTFLOW = Dirichlet p=0: pin at 0, do not update
+                    if (cell_type[c] == CellType::OUTFLOW) { x[c] = 0.0; continue; }
 
                     double hzl = (k > 0)      ? 0.5*(dzv[k-1]+dzv[k]) : dzv[k];
                     double hzr = (k < Nz-1)   ? 0.5*(dzv[k]+dzv[k+1]) : dzv[k];
@@ -265,7 +267,8 @@ void MultigridPoissonSolver::compute_residual(
 
             for (int k = 0; k < Nz; k++) {
                 int c = cidx(i,j,k);
-                if (cell_type[c] == CellType::SOLID) { r[c] = 0.0; continue; }
+                if (cell_type[c] == CellType::SOLID)   { r[c] = 0.0; continue; }
+                if (cell_type[c] == CellType::OUTFLOW) { r[c] = 0.0; continue; }
 
                 double hzl = (k > 0)    ? 0.5*(dzv[k-1]+dzv[k]) : dzv[k];
                 double hzr = (k < Nz-1) ? 0.5*(dzv[k]+dzv[k+1]) : dzv[k];
@@ -328,6 +331,9 @@ void MultigridPoissonSolver::restrict_residual(
 
 // ---------------------------------------------------------------------------
 // prolongate: nearest-neighbor injection from coarse to fine
+// Each fine cell maps to exactly one parent coarse cell (ifine/2, jfine/2, kfine/2).
+// Old += accumulation with clamped indices caused boundary cells to receive
+// 2-8x overcounting; replaced with direct assignment.
 // ---------------------------------------------------------------------------
 void MultigridPoissonSolver::prolongate(
         int Nxc, int Nyc, int Nzc,
@@ -335,23 +341,14 @@ void MultigridPoissonSolver::prolongate(
         int Nxf, int Nyf, int Nzf,
         std::vector<double>& e_fine)
 {
-    std::fill(e_fine.begin(), e_fine.end(), 0.0);
-
-    for (int ic = 0; ic < Nxc; ic++)
-    for (int jc = 0; jc < Nyc; jc++)
-    for (int kc = 0; kc < Nzc; kc++) {
-        double ec = e_coarse[ic*Nyc*Nzc + jc*Nzc + kc];
-        int if_  = std::min(2*ic,   Nxf-1);
-        int if1  = std::min(2*ic+1, Nxf-1);
-        int jf   = std::min(2*jc,   Nyf-1);
-        int jf1  = std::min(2*jc+1, Nyf-1);
-        int kf   = std::min(2*kc,   Nzf-1);
-        int kf1  = std::min(2*kc+1, Nzf-1);
-        // Apply to all 8 fine cells surrounding this coarse cell
-        for (int ii : {if_, if1})
-        for (int jj : {jf,  jf1})
-        for (int kk : {kf,  kf1})
-            e_fine[ii*Nyf*Nzf + jj*Nzf + kk] += ec;
+    for (int ifine = 0; ifine < Nxf; ifine++)
+    for (int jfine = 0; jfine < Nyf; jfine++)
+    for (int kfine = 0; kfine < Nzf; kfine++) {
+        int ic = std::min(ifine / 2, Nxc - 1);
+        int jc = std::min(jfine / 2, Nyc - 1);
+        int kc = std::min(kfine / 2, Nzc - 1);
+        e_fine[ifine*Nyf*Nzf + jfine*Nzf + kfine] =
+            e_coarse[ic*Nyc*Nzc + jc*Nzc + kc];
     }
 }
 
@@ -396,9 +393,29 @@ void MultigridPoissonSolver::v_cycle(
     for (int k = 0; k < Nzc; k++)
         dzvc[k] = dzv[2*k] + (2*k+1 < Nz ? dzv[2*k+1] : 0.0);
 
-    // Coarse cell_type: use FLUID for all (approximate boundary handling)
+    // Coarse cell_type: propagate OUTFLOW/SOLID from the 2×2×2 fine block.
+    // Without OUTFLOW on coarse grids the problem is pure-Neumann (singular)
+    // → Gauss-Seidel diverges → NaN.
     int Nc = Nxc * Nyc * Nzc;
     std::vector<CellType> cell_type_c(Nc, CellType::FLUID);
+    for (int ic = 0; ic < Nxc; ic++)
+    for (int jc = 0; jc < Nyc; jc++)
+    for (int kc = 0; kc < Nzc; kc++) {
+        bool has_outflow = false, all_solid = true;
+        for (int di = 0; di < 2; di++)
+        for (int dj = 0; dj < 2; dj++)
+        for (int dk = 0; dk < 2; dk++) {
+            int ifine = std::min(2*ic+di, Nx-1);
+            int jfine = std::min(2*jc+dj, Ny-1);
+            int kfine = std::min(2*kc+dk, Nz-1);
+            CellType ct = cell_type[ifine*Ny*Nz + jfine*Nz + kfine];
+            if (ct == CellType::OUTFLOW) has_outflow = true;
+            if (ct != CellType::SOLID)   all_solid   = false;
+        }
+        int cc = ic*Nyc*Nzc + jc*Nzc + kc;
+        if      (has_outflow) cell_type_c[cc] = CellType::OUTFLOW;
+        else if (all_solid)   cell_type_c[cc] = CellType::SOLID;
+    }
 
     // Restrict residual to coarse grid
     std::vector<double> r_coarse(Nc, 0.0);
@@ -413,7 +430,11 @@ void MultigridPoissonSolver::v_cycle(
     // Prolongate error back to fine grid and correct x
     std::vector<double> e_fine(Nf, 0.0);
     prolongate(Nxc, Nyc, Nzc, e_coarse, Nx, Ny, Nz, e_fine);
-    for (int idx = 0; idx < Nf; idx++) x[idx] += e_fine[idx];
+    for (int idx = 0; idx < Nf; idx++) {
+        if (cell_type[idx] != CellType::OUTFLOW)
+            x[idx] += e_fine[idx];
+        // OUTFLOW: Dirichlet p=0, no correction applied
+    }
 
     // Post-smoothing
     smooth(Nx, Ny, Nz, dxv, dyv, dzv, cell_type, x, b, 2);
