@@ -12,23 +12,14 @@ if TYPE_CHECKING:
 def _load_core():
     """Lazy import of compiled C++ module."""
     try:
-        import _ffroom_core as _c
+        from . import _ffroom_core as _c
         return _c
-    except ImportError:
-        import sys
-        import pathlib
-        # The .so lives next to this file when installed via build.sh
-        pkg_dir = str(pathlib.Path(__file__).parent)
-        if pkg_dir not in sys.path:
-            sys.path.insert(0, pkg_dir)
-        try:
-            import _ffroom_core as _c
-            return _c
-        except ImportError as e:
-            raise ImportError(
-                "C++ extension _ffroom_core not found. "
-                "Run: bash build.sh"
-            ) from e
+    except ImportError as e:
+        raise ImportError(
+            "C++ extension ff_room._ffroom_core could not be loaded. "
+            "Rebuild with this Python: python -m pip install -e . "
+            "(or run bash build.sh)."
+        ) from e
 
 
 def _stretched_faces(N: int, L: float, r: float) -> list:

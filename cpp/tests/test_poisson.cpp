@@ -3,6 +3,7 @@
 #include "core/Grid.hpp"
 #include "core/PoissonSolver.hpp"
 #include <cmath>
+#include <numbers>
 #include <set>
 
 using namespace ffroom;
@@ -35,11 +36,12 @@ TEST_CASE("Poisson CG converges on small grid", "[poisson]") {
     for (int j = 0; j < N; j++)
     for (int k = 0; k < N; k++) {
         double x = (i+0.5)*dx, y = (j+0.5)*dy, z = (k+0.5)*dz;
-        double pe = std::sin(M_PI*x)*std::sin(M_PI*y)*std::sin(M_PI*z);
+        constexpr double pi = std::numbers::pi;
+        double pe = std::sin(pi*x)*std::sin(pi*y)*std::sin(pi*z);
         p_exact[g.c_idx(i,j,k)] = pe;
         bool boundary = (i==0||i==N-1||j==0||j==N-1||k==0||k==N-1);
         if (!boundary)
-            rhs[g.c_idx(i,j,k)] = -3.0*M_PI*M_PI * pe;
+            rhs[g.c_idx(i,j,k)] = -3.0*pi*pi * pe;
     }
 
     PoissonSolverParams params;

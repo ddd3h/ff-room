@@ -452,22 +452,35 @@ solver:
 
 ## テスト戦略
 
+ビルド基準はC++23、Python 3.11以降、CMake 3.26以降、pybind11 3.1以降。
+GitHub ActionsはPython 3.11〜3.15でwheelを作成し、インストール済みパッケージを
+テストする。最新PythonではLinux (GCC/Clang)・macOS・Windowsも対象にする。
+PyVista/VTKは `viz` extra。Python 3.15ではVTK wheelが未提供のため、
+標準依存のmatplotlibを使用する。
+
 ### Python テスト
 
 ```bash
-cd python && python -m pytest tests/ -v
+python -m pip install -e ".[dev]"
+python -m pytest -v
 ```
 
 - `test_config.py`: 設定シリアライズ、FanConfig角度計算、YAML/JSON往復
 - `test_postprocess.py`: SimResultのNumPy操作、CSV書き出し、npz往復
 
-C++不要。任意の環境で走る。
+- `test_native_core.py`: wheel内の拡張のインポート、NumPyビュー、projection/LBMの実行
+
+設定・後処理テストはC++不要。連携テストにはビルド済みの拡張が必要。
 
 ### C++ テスト (Catch2)
 
 ```bash
-cd cpp/build && cmake .. -DBUILD_TESTS=ON && make && ./ffroom_tests
+cmake -S cpp -B cpp/build -DBUILD_TESTS=ON
+cmake --build cpp/build --parallel 2
+ctest --test-dir cpp/build --output-on-failure
 ```
+
+Catch2 3はOSのパッケージマネージャなどで導入する (pipの開発依存には含めない)。
 
 - `test_grid.cpp`: Grid構築、インデックス一意性、ゼロ化
 - `test_poisson.cpp`: 製造解でCGの収束と精度を検証

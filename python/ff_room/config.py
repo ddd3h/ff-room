@@ -164,6 +164,8 @@ class SceneConfig:
         def _cvt(obj):
             if dataclasses.is_dataclass(obj):
                 return {k: _cvt(v) for k, v in dataclasses.asdict(obj).items()}
+            if isinstance(obj, dict):
+                return {k: _cvt(v) for k, v in obj.items()}
             if isinstance(obj, (list, tuple)):
                 return [_cvt(x) for x in obj]
             return obj
@@ -187,7 +189,7 @@ class SceneConfig:
 
     def save_yaml(self, path: str) -> None:
         with open(path, "w") as f:
-            yaml.dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
+            yaml.safe_dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
 
     def save_json(self, path: str) -> None:
         with open(path, "w") as f:

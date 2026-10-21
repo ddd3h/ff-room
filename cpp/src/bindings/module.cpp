@@ -2,6 +2,7 @@
 #include <pybind11/stl.h>
 #include <pybind11/functional.h>
 #include <pybind11/numpy.h>
+#include <cstring>
 
 #include "../core/Grid.hpp"
 #include "../core/PoissonSolver.hpp"

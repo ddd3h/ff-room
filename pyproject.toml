@@ -1,22 +1,33 @@
 [build-system]
-requires = ["scikit-build-core>=0.6", "pybind11>=2.11"]
+requires = ["scikit-build-core>=1.1.1", "pybind11>=3.1.0"]
 build-backend = "scikit_build_core.build"
 
 [project]
 name = "ff-room"
 version = "0.1.0"
 description = "3D indoor airflow simulation (CFD) with PyVista visualization"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+]
 dependencies = [
-    "numpy>=1.24",
-    "pyyaml>=6.0",
-    "pyvista>=0.43",
+    "numpy>=2.0",
+    "pyyaml>=6.0.3",
+    "matplotlib>=3.10",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "catch2"]
+dev = ["pytest>=8"]
+viz = ["pyvista>=0.46"]
 
 [tool.scikit-build]
+minimum-version = "build-system.requires"
+cmake.version = ">=3.26"
 cmake.source-dir = "cpp"
 cmake.build-type = "Release"
 wheel.packages = ["python/ff_room"]

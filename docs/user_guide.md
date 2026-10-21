@@ -5,18 +5,25 @@
 ### 必要なもの
 
 ```
-Python >= 3.9
-pip install pybind11 pyyaml numpy pyvista
-GCC/Clang (C++17対応), CMake >= 3.15
+Python 3.11〜3.15
+C++23対応コンパイラ (GCC 13+ / Clang 17+ / 現行MSVC)
+CMake >= 3.26
 ```
 
 ### ビルド
 
 ```bash
-bash build.sh
+python -m pip install --upgrade pip
+python -m pip install -e .
 ```
 
-`python/ff_room/_ffroom_core*.so` が生成されれば成功。
+pybind11 3.1以降とscikit-build-coreを使ってC++拡張をビルドする。
+`python -c "from ff_room import _ffroom_core"` が成功すれば利用できる。
+
+3D表示・VTK出力は `python -m pip install -e ".[viz]"` で追加する。
+2026年10月時点でVTKの配布wheelはPython 3.14までのため、Python 3.15では
+matplotlibの2D表示・GIF出力を利用する。3D機能にはPython 3.14を使用する。
+手動ビルドの方法と仮想環境の設定はREADMEを参照。
 
 ### 動作確認
 
