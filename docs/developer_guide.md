@@ -83,9 +83,10 @@ OpenMP 並列化は `FluidSolverParams.use_openmp` (デフォルト false) で�
 
 ### A. 扇風機を斜め方向に向けたい — 実装済み
 
-**実装済み**: `scene.py` の `_add_fan()` が `direction_vector()` から 3成分速度を計算し、
-`FanBC.vel = [vx*V, vy*V, vz*V]` として C++ `apply_inflow()` に渡す。
-`apply_inflow()` は `FanBC.vel` の3成分を対応するface速度 (u/v/w) すべてに設定する。
+**実装済み**: 標準の `FanConfig.model="disk"` は `DiskFanBC` を作成する。
+`FanModel.cpp` がハブ・環状風速分布・旋回を評価し、`BoundaryManager.add_disk_fan()` が
+実座標と局所格子幅から傾いた円盤を構成する。MAC面の速度拘束は事前計算し、
+LBMは同じモデルのセル中心速度を使う。projectionとLBMは異なる離散化である。
 
 使い方:
 
@@ -96,8 +97,8 @@ fans:
   - direction: [0, -90]   # 真下
 ```
 
-`snapped_axis()` はBC面の決定 (扇風機パッチをどの壁に置くか) にのみ使用。
-速度ベクトル自体はスナップしない。
+`snapped_axis()` は従来の `model="patch"` と自動流出境界の選択にのみ使用する。
+`disk` の面・速度ベクトルはスナップしない。詳細な式・近似範囲はmodel_assumptions.md参照。
 
 ---
 
@@ -469,6 +470,7 @@ python -m pytest -v
 - `test_postprocess.py`: SimResultのNumPy操作、CSV書き出し、npz往復
 
 - `test_native_core.py`: wheel内の拡張のインポート、NumPyビュー、projection/LBMの実行
+- `test_fan_model.py`: 公称風量の積分、円形・ハブ・斜め配置、旋回、障害物、両ソルバー
 
 設定・後処理テストはC++不要。連携テストにはビルド済みの拡張が必要。
 

@@ -55,6 +55,7 @@ endif()
 
 set(CORE_SOURCES
     src/core/Grid.cpp
+    src/core/FanModel.cpp
     src/core/PoissonSolver.cpp
     src/core/BoundaryManager.cpp
     src/core/FluidSolver.cpp

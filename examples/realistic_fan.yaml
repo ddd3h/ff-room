@@ -1,0 +1,27 @@
+metadata:
+  name: oblique_disk_fan
+  description: Circular outlet with an annular profile and mild swirl
+
+room:
+  size: [2.0, 1.5, 1.5]
+  grid: [40, 30, 30]  # 8 cells across the 0.4 m fan diameter
+
+fans:
+  - name: circulation_fan
+    position: [0.5, 0.75, 0.75]
+    direction: [25.0, 10.0]
+    radius: 0.20
+    model: disk
+    hub_ratio: 0.20
+    profile: annular
+    flow_rate: 0.30    # m^3/s = 18 m^3/min (nominal)
+    swirl_ratio: 0.15  # negative values reverse the swirl
+
+obstacles: []
+
+solver:
+  dt: 0.001
+  max_steps: 200
+  convergence_tol: 0.01
+  poisson_max_iter: 1000
+  poisson_tol: 1.0e-6

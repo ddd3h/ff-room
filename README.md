@@ -120,7 +120,7 @@ fans:
     position: [0.5, 2.0, 1.2]   # 扇風機中心座標 [m]
     direction: [0.0, 0.0]        # [方位角_deg, 仰角_deg]
     velocity: 3.0                 # 吹き出し風速 [m/s]
-    radius: 0.15                  # 扇風機半径 [m] (正方形近似: 辺=2×radius)
+    radius: 0.15                  # 羽根の外半径 [m]
 
 obstacles:
   - name: sofa
@@ -148,7 +148,34 @@ solver:
 | `[0, 90]`  | 上向き (+z) |
 | `[0, -90]` | 下向き (-z) |
 
-MVP: 方向は最近軸にスナップされる (斜め向きは非対応)。
+`[45, 15]` のような斜め方向も指定でき、円形の吹出口の面も同じ向きに傾く。
+
+### 扇風機の吹き出しモデル
+
+標準の `model: disk` は円形の吹出口を使う。中心のモーター部分と外周で風速を弱め、
+羽根のある環状部分に速度分布を与える。projection・LBMの両ソルバーで利用できる。
+
+```yaml
+fans:
+  - name: circulation_fan
+    position: [0.5, 2.0, 1.2]
+    direction: [30, 10]
+    radius: 0.20
+    model: disk
+    hub_ratio: 0.20         # 中心部の半径 / 羽根外半径
+    profile: annular       # 中心・外周で弱まる分布 (uniformも選択可)
+    flow_rate: 0.30        # m³/s = 18 m³/min。指定時はvelocityより優先
+    swirl_ratio: 0.15      # 旋回の強さ。0は旋回なし、負値で逆回転
+```
+
+`velocity` は羽根の環状部分の平均軸方向速度。`flow_rate` は
+`π radius² (1 - hub_ratio²) × velocity` で換算する公称値で、格子上の実流量には
+離散化・障害物の影響がある。直径を少なくとも4セル、分布の比較には8セル以上で
+解像する。粗い格子では警告し、吹出口を表現できない場合はエラーにする。
+
+従来の四角い一様送風は `model: patch` で選択できる。既存YAMLも読み込めるが、
+`model` を省略した場合は新しい円形モデルを使うため、以前の結果の再現には `patch` を指定する。
+詳細と近似の範囲は [数値モデルの仮定](docs/model_assumptions.md#5-扇風機モデルの近似) を参照。
 
 ### 座標系
 

@@ -1,7 +1,9 @@
 #pragma once
 #include "Grid.hpp"
+#include "FanModel.hpp"
 #include <array>
 #include <vector>
+#include <utility>
 
 namespace ffroom {
 
@@ -36,6 +38,7 @@ public:
                        int k0, int k1);
 
     void add_fan(Grid& grid, const FanBC& fan);
+    void add_disk_fan(Grid& grid, const DiskFanBC& fan);
 
     // Add an outflow patch. Cells on the patch are marked OUTFLOW.
     void add_outflow(Grid& grid, const OutflowBC& obc);
@@ -60,11 +63,14 @@ public:
     const std::vector<FanBC>&     fans()     const { return fans_; }
     const std::vector<OutflowBC>& outflows() const { return outflows_; }
     const std::vector<OpeningBC>& openings() const { return openings_; }
+    const std::vector<FanInflowCell>& inflow_cells() const { return inflow_cells_; }
 
 private:
     std::vector<FanBC>     fans_;
     std::vector<OutflowBC> outflows_;
     std::vector<OpeningBC> openings_;
+    std::vector<FanInflowCell> inflow_cells_;
+    std::array<std::vector<std::pair<int, double>>, 3> disk_faces_;
 
     bool _is_outflow_face_x(const Grid& g, int j, int k, bool high) const;
     bool _is_outflow_face_y(const Grid& g, int i, int k, bool high) const;

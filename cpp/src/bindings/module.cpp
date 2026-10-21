@@ -99,7 +99,18 @@ PYBIND11_MODULE(_ffroom_core, m) {
         .def("zero_velocity", &Grid::zero_velocity)
         .def("zero_pressure", &Grid::zero_pressure);
 
-    // FanBC
+    py::class_<DiskFanBC>(m, "DiskFanBC")
+        .def(py::init<>())
+        .def_readwrite("center", &DiskFanBC::center)
+        .def_readwrite("direction", &DiskFanBC::direction)
+        .def_readwrite("velocity", &DiskFanBC::velocity)
+        .def_readwrite("radius", &DiskFanBC::radius)
+        .def_readwrite("hub_ratio", &DiskFanBC::hub_ratio)
+        .def_readwrite("swirl_ratio", &DiskFanBC::swirl_ratio)
+        .def_readwrite("uniform_profile", &DiskFanBC::uniform_profile)
+        .def("velocity_at", &DiskFanBC::velocity_at);
+
+    // Legacy rectangular patch
     py::class_<FanBC>(m, "FanBC")
         .def(py::init<>())
         .def_readwrite("i_min", &FanBC::i_min)
@@ -136,6 +147,7 @@ PYBIND11_MODULE(_ffroom_core, m) {
         .def(py::init<>())
         .def("add_solid_box",              &BoundaryManager::add_solid_box)
         .def("add_fan",                    &BoundaryManager::add_fan)
+        .def("add_disk_fan",               &BoundaryManager::add_disk_fan)
         .def("add_outflow",                &BoundaryManager::add_outflow)
         .def("add_opening",                &BoundaryManager::add_opening)
         .def("apply_noslip",               &BoundaryManager::apply_noslip)

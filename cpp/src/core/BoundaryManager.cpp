@@ -1,5 +1,8 @@
 #include "BoundaryManager.hpp"
 #include <algorithm>
+#include <cmath>
+#include <map>
+#include <stdexcept>
 
 namespace ffroom {
 
@@ -18,7 +21,69 @@ void BoundaryManager::add_fan(Grid& grid, const FanBC& fan) {
     for (int i = std::max(0,fan.i_min); i <= std::min(grid.Nx-1,fan.i_max); i++)
     for (int j = std::max(0,fan.j_min); j <= std::min(grid.Ny-1,fan.j_max); j++)
     for (int k = std::max(0,fan.k_min); k <= std::min(grid.Nz-1,fan.k_max); k++)
-        grid.cell_type[grid.c_idx(i,j,k)] = CellType::INFLOW;
+        if (grid.cell_type[grid.c_idx(i,j,k)] != CellType::SOLID) {
+            grid.cell_type[grid.c_idx(i,j,k)] = CellType::INFLOW;
+            inflow_cells_.push_back({{i,j,k}, fan.vel});
+        }
+}
+
+void BoundaryManager::add_disk_fan(Grid& g, const DiskFanBC& fan) {
+    fan.validate();
+    if (fan.velocity == 0.0) return;
+    auto n = fan.normal();
+    std::vector<FanInflowCell> cells;
+    std::array<std::map<int, double>, 3> faces;
+    bool active = false;
+    auto solid = [&](int i, int j, int k) {
+        return g.cell_type[g.c_idx(i,j,k)] == CellType::SOLID;
+    };
+    for (int i = 0; i < g.Nx; ++i)
+    for (int j = 0; j < g.Ny; ++j)
+    for (int k = 0; k < g.Nz; ++k) {
+        if (solid(i,j,k)) continue;
+        std::array<double, 3> p{0.5*(g.xs[i]+g.xs[i+1]),
+                                0.5*(g.ys[j]+g.ys[j+1]),
+                                0.5*(g.zs[k]+g.zs[k+1])};
+        double s = 0.0;
+        for (int a = 0; a < 3; ++a) s += (p[a]-fan.center[a])*n[a];
+        // One projected cell thickness, using actual stretched-grid spacings.
+        double half = 0.5*(std::abs(n[0])*g.dxv[i] +
+                           std::abs(n[1])*g.dyv[j] + std::abs(n[2])*g.dzv[k]);
+        if (std::abs(s) > half + 1e-12 ||
+            fan.radial_distance_squared(p) >= fan.radius*fan.radius) continue;
+        if (g.cell_type[g.c_idx(i,j,k)] == CellType::INFLOW)
+            throw std::invalid_argument("Fan outlets overlap; separate the fans or refine the grid");
+        auto v = fan.velocity_at(p);
+        active = active || std::hypot(v[0],v[1],v[2]) > 0.0;
+        cells.push_back({{i,j,k}, v});
+        for (int a = 0; a < 3; ++a) {
+            for (int side = 0; side < 2; ++side) {
+                int fi=i, fj=j, fk=k;
+                if (a == 0) fi += side;
+                if (a == 1) fj += side;
+                if (a == 2) fk += side;
+                // Do not drive through room walls or furniture.
+                if ((a == 0 && (fi == 0 || fi == g.Nx || solid(fi-1,fj,fk) || solid(fi,fj,fk))) ||
+                    (a == 1 && (fj == 0 || fj == g.Ny || solid(fi,fj-1,fk) || solid(fi,fj,fk))) ||
+                    (a == 2 && (fk == 0 || fk == g.Nz || solid(fi,fj,fk-1) || solid(fi,fj,fk)))) continue;
+                auto fp = p;
+                fp[a] = a == 0 ? g.xs[fi] : (a == 1 ? g.ys[fj] : g.zs[fk]);
+                if (fan.radial_distance_squared(fp) >= fan.radius*fan.radius) continue;
+                int idx = a == 0 ? g.u_idx(fi,fj,fk) :
+                         (a == 1 ? g.v_idx(fi,fj,fk) : g.w_idx(fi,fj,fk));
+                faces[a][idx] = fan.velocity_at(fp)[a];
+            }
+        }
+    }
+    if (!active) throw std::invalid_argument(
+        "Fan blade annulus is not resolved or is blocked; refine the grid or move the fan");
+    for (const auto& cell : cells) {
+        auto c = cell.cell;
+        g.cell_type[g.c_idx(c[0],c[1],c[2])] = CellType::INFLOW;
+        inflow_cells_.push_back(cell);
+    }
+    for (int a = 0; a < 3; ++a)
+        for (const auto& face : faces[a]) disk_faces_[a].push_back(face);
 }
 
 void BoundaryManager::add_outflow(Grid& grid, const OutflowBC& obc) {
@@ -126,6 +191,10 @@ void BoundaryManager::apply_inflow(Grid& grid) {
                 grid.w[grid.w_idx(i, j, k+1)] = fan.vel[2];
             }
         }
+    }
+    for (int a = 0; a < 3; ++a) {
+        auto& field = a == 0 ? grid.u : (a == 1 ? grid.v : grid.w);
+        for (const auto& [index, velocity] : disk_faces_[a]) field[index] = velocity;
     }
 }
 
