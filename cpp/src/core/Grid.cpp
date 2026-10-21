@@ -1,5 +1,7 @@
 #include "Grid.hpp"
+#include <algorithm>
 #include <stdexcept>
+#include <utility>
 
 namespace ffroom {
 
