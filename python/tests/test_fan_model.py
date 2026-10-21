@@ -143,12 +143,22 @@ def test_scene_warns_when_fan_is_underresolved():
         Scene(config)
 
 
-def test_overlapping_fans_are_reported_without_mutating_the_grid():
+@pytest.mark.parametrize("second_model", ["disk", "patch"])
+def test_overlapping_fans_are_reported_without_mutating_the_grid(second_model):
     grid = core.Grid(10, 40, 40, 1.0, 1.0, 1.0)
     bm = core.BoundaryManager()
     bc = disk()
     bm.add_disk_fan(grid, bc)
     before = grid.cell_type_shaped().copy()
+    if second_model == "patch":
+        bc = core.FanBC()
+        bc.i_min, bc.i_max = 4, 5
+        bc.j_min, bc.j_max = 15, 24
+        bc.k_min, bc.k_max = 15, 24
+        bc.vel = [2.0, 0.0, 0.0]
     with pytest.raises(ValueError, match="outlets overlap"):
-        bm.add_disk_fan(grid, bc)
+        if second_model == "disk":
+            bm.add_disk_fan(grid, bc)
+        else:
+            bm.add_fan(grid, bc)
     np.testing.assert_array_equal(grid.cell_type_shaped(), before)

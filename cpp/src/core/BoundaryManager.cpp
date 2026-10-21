@@ -17,6 +17,11 @@ void BoundaryManager::add_solid_box(Grid& grid,
 }
 
 void BoundaryManager::add_fan(Grid& grid, const FanBC& fan) {
+    for (int i = std::max(0,fan.i_min); i <= std::min(grid.Nx-1,fan.i_max); i++)
+    for (int j = std::max(0,fan.j_min); j <= std::min(grid.Ny-1,fan.j_max); j++)
+    for (int k = std::max(0,fan.k_min); k <= std::min(grid.Nz-1,fan.k_max); k++)
+        if (grid.cell_type[grid.c_idx(i,j,k)] == CellType::INFLOW)
+            throw std::invalid_argument("Fan outlets overlap; separate the fans or refine the grid");
     fans_.push_back(fan);
     for (int i = std::max(0,fan.i_min); i <= std::min(grid.Nx-1,fan.i_max); i++)
     for (int j = std::max(0,fan.j_min); j <= std::min(grid.Ny-1,fan.j_max); j++)
