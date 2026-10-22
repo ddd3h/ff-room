@@ -78,22 +78,16 @@ void LBMSolver::initialize_f() {
 // ---------------------------------------------------------------------------
 
 void LBMSolver::apply_inflow_bc() {
-    const auto& fans = bm_.fans();
-    for (const auto& fan : fans) {
+    for (const auto& sample : bm_.inflow_cells()) {
         // Convert physical velocity [m/s] to lattice velocity [dimensionless]
-        double vx = fan.vel[0] * phys_to_lat_;
-        double vy = fan.vel[1] * phys_to_lat_;
-        double vz = fan.vel[2] * phys_to_lat_;
-        for (int i = fan.i_min; i <= fan.i_max; i++)
-        for (int j = fan.j_min; j <= fan.j_max; j++)
-        for (int k = fan.k_min; k <= fan.k_max; k++) {
-            if (i < 0 || i >= grid_.Nx || j < 0 || j >= grid_.Ny || k < 0 || k >= grid_.Nz)
-                continue;
-            int c = grid_.c_idx(i, j, k);
-            if (grid_.cell_type[c] != CellType::INFLOW) continue;
-            for (int q = 0; q < Q; q++) {
-                f_[f_idx(q, i, j, k)] = feq(q, 1.0, vx, vy, vz);
-            }
+        double vx = sample.velocity[0] * phys_to_lat_;
+        double vy = sample.velocity[1] * phys_to_lat_;
+        double vz = sample.velocity[2] * phys_to_lat_;
+        auto [i,j,k] = sample.cell;
+        int c = grid_.c_idx(i, j, k);
+        if (grid_.cell_type[c] != CellType::INFLOW) continue;
+        for (int q = 0; q < Q; q++) {
+            f_[f_idx(q, i, j, k)] = feq(q, 1.0, vx, vy, vz);
         }
     }
 }

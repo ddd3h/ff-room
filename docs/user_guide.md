@@ -5,18 +5,25 @@
 ### 必要なもの
 
 ```
-Python >= 3.9
-pip install pybind11 pyyaml numpy pyvista
-GCC/Clang (C++17対応), CMake >= 3.15
+Python 3.11〜3.15
+C++23対応コンパイラ (GCC 13+ / Clang 17+ / 現行MSVC)
+CMake >= 3.26
 ```
 
 ### ビルド
 
 ```bash
-bash build.sh
+python -m pip install --upgrade pip
+python -m pip install -e .
 ```
 
-`python/ff_room/_ffroom_core*.so` が生成されれば成功。
+pybind11 3.1以降とscikit-build-coreを使ってC++拡張をビルドする。
+`python -c "from ff_room import _ffroom_core"` が成功すれば利用できる。
+
+3D表示・VTK出力は `python -m pip install -e ".[viz]"` で追加する。
+2026年10月時点でVTKの配布wheelはPython 3.14までのため、Python 3.15では
+matplotlibの2D表示・GIF出力を利用する。3D機能にはPython 3.14を使用する。
+手動ビルドの方法と仮想環境の設定はREADMEを参照。
 
 ### 動作確認
 
@@ -69,8 +76,12 @@ fans:
   - name: fan0
     position: [0.5, 2.0, 1.2]   # 扇風機フェイス中心 [m]
     direction: [0.0, 0.0]        # [方位角, 仰角] deg
-    velocity: 3.0                 # 吹き出し速度 [m/s]
+    velocity: 3.0                 # 羽根の環状部分の平均軸方向速度 [m/s]
     radius: 0.15                  # 半径 [m]
+    model: disk                   # 標準。従来モデルはpatch
+    hub_ratio: 0.2                # 中心部の半径 / 外半径
+    profile: annular              # 中心・外周で減速。uniformも選択可
+    swirl_ratio: 0.0              # 旋回比。符号で回転方向を反転
 ```
 
 **directionの指定方法**
@@ -86,22 +97,28 @@ direction: [0, 30]   → 東に向けて少し上に吹く
 direction: [0, -90]  → 床に向けて真下に吹く
 ```
 
-> **注意 (MVP)**: 方向は最近接の軸にスナップされる。例えば `[45, 0]` は
-> `[0, 0]` (x軸) と同等になる。斜め方向対応は developer_guide.md 参照。
+`[45, 0]` は実際に45度方向へ送風し、`disk` の吹出口も45度に傾く。
+`flow_rate: 0.3` を指定すると公称風量0.3 m³/s (=18 m³/min)から平均速度を計算し、
+`velocity` より優先する。平均速度×羽根の環状面積による換算であり、格子上の
+実流量をフィードバック制御する設定ではない。
+
+直径4セル未満では警告を表示する。ハブや風速分布を比較する場合は8セル以上を推奨。
+格子が粗すぎる、または家具で吹出口が覆われている場合は配置・格子を修正する。
+従来の四角い一様送風を再現するときは `model: patch` を明示する。
 
 **positionの注意点**  
 - 壁際に置く場合: position の x 座標を `radius` より大きく設定する
 - 壁面に接する場合: 例えば西壁 (x=0) に設置するなら `position[0] = radius + dx/2`
 - 格子の外に出ないこと (0〜Lx, 0〜Ly, 0〜Lz の範囲内)
 
-**velocityの目安**
+**velocityと実製品の仕様の違い**
 
-| 扇風機強さ | velocity [m/s] |
-|-----------|---------------|
-| 弱風 | 1.0〜2.0 |
-| 中風 | 2.5〜4.0 |
-| 強風 | 4.0〜6.0 |
-| 業務用 | 6.0〜 |
+`velocity` は吹出口の環状面での平均軸方向速度であり、実機の「弱・中・強」や
+カタログの最大風速と直接対応しない。annular分布の最大軸方向速度は平均の1.5倍になる。
+また、離れた測定面で求めたカタログ風量には周囲の空気の巻込みが含まれる場合があるため、
+その数値を `flow_rate` にそのまま転記しない。
+製品の測定条件・通過流量・下流速度分布を揃えて校正する必要がある。
+[実製品との照合結果](fan_validation.md)を参照。
 
 ---
 

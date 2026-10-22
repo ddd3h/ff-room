@@ -7,7 +7,7 @@
 扇風機の位置・向き・風量を変えながら流れの違いを比較できる。研究用途向けに再現性を重視。
 
 **数値手法**: 非圧縮性Navier-Stokes方程式 + Chorin射影法 on MAC格子  
-**言語**: C++17 (ソルバー) + Python 3.9+ (UI・可視化)  
+**言語**: C++23 (ソルバー) + Python 3.11〜3.15 (UI・可視化)<br>
 **連携**: pybind11
 
 
@@ -30,26 +30,47 @@
 
 | ツール | バージョン |
 |--------|-----------|
-| Python | >= 3.9 |
-| C++ コンパイラ | GCC 9+ / Clang 10+ (C++17対応) |
-| CMake | >= 3.15 |
-| pybind11 | >= 2.11 (自動DL可) |
+| Python | >= 3.11 (最新安定版: 3.15.1) |
+| C++ コンパイラ | C++23対応 (GCC 13+ / Clang 17+ / 現行MSVC) |
+| CMake | >= 3.26 (4.x対応) |
+| pybind11 | >= 3.1.0 (自動DL可) |
+
+公開済みの最新C++規格は [C++23](https://isocpp.org/std/the-standard)。
+Pythonは [3.15系](https://www.python.org/downloads/) に対応し、CIで3.11〜3.15の
+wheelビルド・インストール・C++拡張の実行を確認する。
 
 ### 手順
 
 ```bash
-# 1. Python依存パッケージ
-pip install pybind11 pyyaml numpy pyvista
+# 推奨: 使用するPythonで仮想環境を作成
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 
-# 2. C++拡張モジュールをビルド
+# C++拡張とPythonパッケージをインストール
+python -m pip install -e ".[dev]"
+
+# 3D表示・VTK出力を使う場合 (VTKが対応するPython環境)
+python -m pip install -e ".[viz]"
+```
+
+PyVista/VTKはオプションの `viz` に分離した。2026年10月時点で
+[VTKの配布wheel](https://pypi.org/project/vtk/#files) はPython 3.14までのため、
+Python 3.15では標準のmatplotlibバックエンドで2D可視化・GIF出力を利用できる。
+3D表示・VTK出力が必要な場合はPython 3.14で `.[viz]` をインストールする。
+
+手動でビルドする場合:
+
+```bash
+python -m pip install 'pybind11>=3.1.0' 'cmake>=3.26' numpy pyyaml matplotlib
 bash build.sh
-
-# または pip install (scikit-build-core経由)
-pip install -e .
+export PYTHONPATH="$PWD/python${PYTHONPATH:+:$PYTHONPATH}"
 ```
 
 `build.sh` は `cpp/build/` でcmakeを走らせ、生成した `_ffroom_core*.so` を
 `python/ff_room/` にインストールする。
+使用するPythonは `PYTHON_EXECUTABLE`、有効なvenv、conda、PATHの順に選択する。
+別のPythonへ切り替える際は `cpp/build/` を削除してから再ビルドする。
 
 
 ## クイックスタート
@@ -99,7 +120,7 @@ fans:
     position: [0.5, 2.0, 1.2]   # 扇風機中心座標 [m]
     direction: [0.0, 0.0]        # [方位角_deg, 仰角_deg]
     velocity: 3.0                 # 吹き出し風速 [m/s]
-    radius: 0.15                  # 扇風機半径 [m] (正方形近似: 辺=2×radius)
+    radius: 0.15                  # 羽根の外半径 [m]
 
 obstacles:
   - name: sofa
@@ -127,7 +148,36 @@ solver:
 | `[0, 90]`  | 上向き (+z) |
 | `[0, -90]` | 下向き (-z) |
 
-MVP: 方向は最近軸にスナップされる (斜め向きは非対応)。
+`[45, 15]` のような斜め方向も指定でき、円形の吹出口の面も同じ向きに傾く。
+
+### 扇風機の吹き出しモデル
+
+標準の `model: disk` は円形の吹出口を使う。中心のモーター部分と外周で風速を弱め、
+羽根のある環状部分に速度分布を与える。projection・LBMの両ソルバーで利用できる。
+
+```yaml
+fans:
+  - name: circulation_fan
+    position: [0.5, 2.0, 1.2]
+    direction: [30, 10]
+    radius: 0.20
+    model: disk
+    hub_ratio: 0.20         # 中心部の半径 / 羽根外半径
+    profile: annular       # 中心・外周で弱まる分布 (uniformも選択可)
+    flow_rate: 0.30        # m³/s = 18 m³/min。指定時はvelocityより優先
+    swirl_ratio: 0.15      # 旋回の強さ。0は旋回なし、負値で逆回転
+```
+
+`velocity` は羽根の環状部分の平均軸方向速度。`flow_rate` は
+`π radius² (1 - hub_ratio²) × velocity` で換算する公称値で、格子上の実流量には
+離散化・障害物の影響がある。直径を少なくとも4セル、分布の比較には8セル以上で
+解像する。粗い格子では警告し、吹出口を表現できない場合はエラーにする。
+
+従来の四角い一様送風は `model: patch` で選択できる。既存YAMLも読み込めるが、
+`model` を省略した場合は新しい円形モデルを使うため、以前の結果の再現には `patch` を指定する。
+詳細と近似の範囲は [数値モデルの仮定](docs/model_assumptions.md#5-扇風機モデルの近似) を参照。
+実製品のカタログ風量は測定面・巻込みの影響を含む場合があり、測定条件が不明なまま `flow_rate` に転記しない。
+[家庭用扇風機との照合結果](docs/fan_validation.md)に、公開仕様と現在の設定値の比較をまとめた。
 
 ### 座標系
 
@@ -274,20 +324,25 @@ ff-room/
 
 ## テスト実行
 
-### Python テスト (C++不要)
+### Python・C++連携テスト
 
 ```bash
-cd python
-python -m pytest tests/ -v
+python -m pip install -e ".[dev]"
+python -m pytest -v
 ```
+
+設定・後処理のみのテストは `test_config.py` と `test_postprocess.py`。
+`test_native_core.py` はインストール済みのC++拡張、NumPyビュー、両ソルバーを検証する。
 
 ### C++ テスト (Catch2が必要)
 
 ```bash
-cd cpp/build
-cmake .. -DBUILD_TESTS=ON
-make && ./ffroom_tests
+cmake -S cpp -B cpp/build -DBUILD_TESTS=ON
+cmake --build cpp/build --parallel 2
+ctest --test-dir cpp/build --output-on-failure
 ```
+
+Catch2 3はOSのパッケージマネージャなどで別途導入する。
 
 
 ## ドキュメント一覧

@@ -18,6 +18,7 @@ def _mock_result(Nx=4, Ny=4, Nz=4) -> SimResult:
     p = np.zeros((Nx, Ny, Nz))
     ct = np.zeros((Nx, Ny, Nz), dtype=np.uint8)
     return SimResult(u_field=u, v_field=v, w_field=w, p_field=p,
+                     T_field=np.full((Nx, Ny, Nz), config.solver.T_initial),
                      cell_type=ct, config=config)
 
 

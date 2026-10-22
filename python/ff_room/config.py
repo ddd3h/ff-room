@@ -23,20 +23,63 @@ class RoomConfig:
 
 @dataclass
 class FanConfig:
-    """Single fan modeled as a rectangular inflow patch.
+    """Circular fan outlet with a hub, radial profile, and optional swirl.
 
     position: center of fan face [m] in room coordinates
     direction: blowing direction as (azimuth_deg, elevation_deg)
                azimuth: 0=+x, 90=+y, 180=-x, 270=-y; elevation: 0=horizontal, 90=up
                Full 3-component oblique directions supported.
-    velocity:  bulk inflow speed [m/s]
-    radius:    half-width of fan face [m] (square patch: side = 2*radius)
+    velocity:  area-mean axial speed over the blade annulus [m/s]
+    radius:    outer blade radius [m]
+    flow_rate: nominal volume flow [m³/s]; overrides velocity when supplied
+    model:     "disk" (default), or legacy rectangular "patch"
     """
     position:  Tuple[float, float, float] = (0.5, 2.0, 1.0)
     direction: Tuple[float, float] = (0.0, 0.0)  # (azimuth_deg, elevation_deg)
     velocity:  float = 3.0
     radius:    float = 0.15
     name:      str   = "fan0"
+    model:     str   = "disk"
+    hub_ratio: float = 0.2
+    profile:   str   = "annular"  # "annular" or "uniform"
+    swirl_ratio: float = 0.0      # signed; right-hand rotation about direction
+    flow_rate: float | None = None
+
+    def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
+        if self.model not in {"disk", "patch"}:
+            raise ValueError("fan.model must be 'disk' or 'patch'")
+        if self.profile not in {"annular", "uniform"}:
+            raise ValueError("fan.profile must be 'annular' or 'uniform'")
+        if len(self.position) != 3 or not all(math.isfinite(x) for x in self.position):
+            raise ValueError("fan.position must contain three finite coordinates")
+        if len(self.direction) != 2 or not all(math.isfinite(x) for x in self.direction):
+            raise ValueError("fan.direction must contain two finite angles")
+        if not math.isfinite(self.radius) or self.radius <= 0:
+            raise ValueError("fan.radius must be positive and finite")
+        if not math.isfinite(self.velocity) or self.velocity < 0:
+            raise ValueError("fan.velocity must be nonnegative and finite")
+        if not math.isfinite(self.hub_ratio) or not 0 <= self.hub_ratio < 1:
+            raise ValueError("fan.hub_ratio must be in [0, 1)")
+        if not math.isfinite(self.swirl_ratio):
+            raise ValueError("fan.swirl_ratio must be finite")
+        if self.flow_rate is not None and (
+            not math.isfinite(self.flow_rate) or self.flow_rate < 0
+        ):
+            raise ValueError("fan.flow_rate must be nonnegative and finite")
+
+    def outlet_area(self) -> float:
+        """Active outlet area [m²]; the disk hub does not contribute."""
+        self.validate()
+        return (math.pi * self.radius**2 * (1-self.hub_ratio**2)
+                if self.model == "disk" else 4*self.radius**2)
+
+    def bulk_velocity(self) -> float:
+        """Mean axial speed [m/s], derived from flow_rate when present."""
+        self.validate()
+        return self.velocity if self.flow_rate is None else self.flow_rate/self.outlet_area()
 
     def direction_vector(self) -> Tuple[float, float, float]:
         """Return unit vector from azimuth/elevation angles."""
@@ -48,7 +91,7 @@ class FanConfig:
         return (x, y, z)
 
     def snapped_axis(self) -> int:
-        """Return dominant axis index (0=x, 1=y, 2=z) for MVP axis-aligned BC."""
+        """Dominant axis for the legacy patch and automatic outflow wall."""
         v = self.direction_vector()
         return int(max(range(3), key=lambda i: abs(v[i])))
 
@@ -164,6 +207,8 @@ class SceneConfig:
         def _cvt(obj):
             if dataclasses.is_dataclass(obj):
                 return {k: _cvt(v) for k, v in dataclasses.asdict(obj).items()}
+            if isinstance(obj, dict):
+                return {k: _cvt(v) for k, v in obj.items()}
             if isinstance(obj, (list, tuple)):
                 return [_cvt(x) for x in obj]
             return obj
@@ -187,7 +232,7 @@ class SceneConfig:
 
     def save_yaml(self, path: str) -> None:
         with open(path, "w") as f:
-            yaml.dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
+            yaml.safe_dump(self.to_dict(), f, default_flow_style=False, sort_keys=False)
 
     def save_json(self, path: str) -> None:
         with open(path, "w") as f:

@@ -1,6 +1,8 @@
 """Scene: translates SceneConfig into C++ Grid + BoundaryManager objects."""
 from __future__ import annotations
 import math
+import warnings
+import numpy as np
 from typing import TYPE_CHECKING
 
 from .config import SceneConfig, FanConfig, ObstacleConfig, OpeningConfig
@@ -12,23 +14,14 @@ if TYPE_CHECKING:
 def _load_core():
     """Lazy import of compiled C++ module."""
     try:
-        import _ffroom_core as _c
+        from . import _ffroom_core as _c
         return _c
-    except ImportError:
-        import sys
-        import pathlib
-        # The .so lives next to this file when installed via build.sh
-        pkg_dir = str(pathlib.Path(__file__).parent)
-        if pkg_dir not in sys.path:
-            sys.path.insert(0, pkg_dir)
-        try:
-            import _ffroom_core as _c
-            return _c
-        except ImportError as e:
-            raise ImportError(
-                "C++ extension _ffroom_core not found. "
-                "Run: bash build.sh"
-            ) from e
+    except ImportError as e:
+        raise ImportError(
+            "C++ extension ff_room._ffroom_core could not be loaded. "
+            "Rebuild with this Python: python -m pip install -e . "
+            "(or run bash build.sh)."
+        ) from e
 
 
 def _stretched_faces(N: int, L: float, r: float) -> list:
@@ -145,8 +138,33 @@ class Scene:
         self.bm.add_solid_box(self.grid, i0, i1, j0, j1, k0, k1)
 
     def _add_fan(self, fan: FanConfig) -> None:
+        fan.validate()  # also validate configurations modified after construction
         g  = self.grid
         r  = self.config.room
+        if any(x < 0 or x > length for x, length in zip(fan.position, r.size)):
+            raise ValueError(f"Fan {fan.name!r} center lies outside the room")
+        if fan.model == "disk":
+            bc = self._c.DiskFanBC()
+            bc.center = fan.position
+            bc.direction = fan.direction_vector()
+            bc.velocity = fan.bulk_velocity()
+            bc.radius = fan.radius
+            bc.hub_ratio = fan.hub_ratio
+            bc.swirl_ratio = fan.swirl_ratio
+            bc.uniform_profile = fan.profile == "uniform"
+            # Use the grid's actual local spacing, including geometric stretching.
+            spacings = []
+            for coords, x in zip((g.xs(), g.ys(), g.zs()), fan.position):
+                idx = min(len(coords)-2, max(0, int(np.searchsorted(coords, x)-1)))
+                spacings.append(float(coords[idx+1]-coords[idx]))
+            if fan.bulk_velocity() > 0 and 2*fan.radius < 4*max(spacings):
+                warnings.warn(
+                    f"Fan {fan.name!r}: fewer than four cells across the diameter; "
+                    "refine the grid to resolve the hub and outlet profile.",
+                    UserWarning, stacklevel=2,
+                )
+            self.bm.add_disk_fan(g, bc)
+            return
         ax = fan.snapped_axis()  # dominant axis: inflow face placed here
         sg = fan.snapped_sign()
         vx, vy, vz = fan.direction_vector()  # full 3-component unit vector
@@ -162,7 +180,7 @@ class Scene:
 
         bc = self._c.FanBC()
         # All three velocity components set — C++ apply_inflow() handles oblique flow.
-        bc.vel = [vx * fan.velocity, vy * fan.velocity, vz * fan.velocity]
+        bc.vel = [vx * fan.bulk_velocity(), vy * fan.bulk_velocity(), vz * fan.bulk_velocity()]
 
         if ax == 0:  # dominant direction: x
             ix = to_cell(cx, r.size[0], r.grid[0])
