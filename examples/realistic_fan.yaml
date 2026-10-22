@@ -1,6 +1,6 @@
 metadata:
   name: oblique_disk_fan
-  description: Circular outlet with an annular profile and mild swirl
+  description: Uncalibrated circular outlet example, not a commercial fan preset
 
 room:
   size: [2.0, 1.5, 1.5]
@@ -14,7 +14,7 @@ fans:
     model: disk
     hub_ratio: 0.20
     profile: annular
-    flow_rate: 0.30    # m^3/s = 18 m^3/min (nominal)
+    flow_rate: 0.30    # disk-plane m^3/s = 18 m^3/min; not catalog airflow
     swirl_ratio: 0.15  # negative values reverse the swirl
 
 obstacles: []
